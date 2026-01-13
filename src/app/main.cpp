@@ -1,13 +1,22 @@
 #include <Windows.h>
 
 #include <QClipboard>
+#include <QDateTime>
 #include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QQuickStyle>
+#include <QTextStream>
 #include <QUrlQuery>
 
+#include "../core/AppPaths.h"
 #include "../core/BrowserController.h"
 #include "../core/CommandBus.h"
 #include "../core/DownloadModel.h"
@@ -21,14 +30,143 @@
 #include "../core/ToastController.h"
 #include "../engine/webview2/WebView2View.h"
 
+namespace
+{
+QString detectQtInstallPrefix()
+{
+  const wchar_t* candidates[] = { L"Qt6Core.dll", L"Qt6Cored.dll" };
+  HMODULE module = nullptr;
+  for (const wchar_t* candidate : candidates) {
+    module = GetModuleHandleW(candidate);
+    if (module) {
+      break;
+    }
+  }
+  if (!module) {
+    return {};
+  }
+
+  wchar_t buffer[MAX_PATH + 1]{};
+  const DWORD len = GetModuleFileNameW(module, buffer, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH) {
+    return {};
+  }
+
+  const QString dllPath = QString::fromWCharArray(buffer, static_cast<int>(len));
+  const QFileInfo info(dllPath);
+  QDir binDir(info.absolutePath());
+  if (!binDir.exists()) {
+    return {};
+  }
+  if (!binDir.cdUp()) {
+    return {};
+  }
+  return binDir.absolutePath();
+}
+
+void ensureQtRuntimePaths()
+{
+  const QString prefix = detectQtInstallPrefix();
+  if (prefix.isEmpty()) {
+    return;
+  }
+
+  const QString pluginsPath = QDir(prefix).filePath("plugins");
+  const QString qmlPath = QDir(prefix).filePath("qml");
+  const QString platformsPath = QDir(pluginsPath).filePath("platforms");
+
+  const auto setIfEmpty = [](const char* key, const QString& value) {
+    if (value.isEmpty() || !qEnvironmentVariableIsEmpty(key)) {
+      return;
+    }
+    qputenv(key, QDir::toNativeSeparators(value).toUtf8());
+  };
+
+  if (QDir(pluginsPath).exists()) {
+    setIfEmpty("QT_PLUGIN_PATH", pluginsPath);
+  }
+  if (QDir(qmlPath).exists()) {
+    setIfEmpty("QML2_IMPORT_PATH", qmlPath);
+  }
+  if (QDir(platformsPath).exists()) {
+    setIfEmpty("QT_QPA_PLATFORM_PLUGIN_PATH", platformsPath);
+  }
+}
+
+void showFatalMessage(const QString& message, const QString& title = QStringLiteral("XBrowser"))
+{
+  MessageBoxW(
+    nullptr,
+    reinterpret_cast<const wchar_t*>(message.utf16()),
+    reinterpret_cast<const wchar_t*>(title.utf16()),
+    MB_OK | MB_ICONERROR);
+}
+
+QFile* g_logFile = nullptr;
+QMutex g_logMutex;
+
+QString logLevel(QtMsgType type)
+{
+  switch (type) {
+    case QtDebugMsg:
+      return QStringLiteral("DEBUG");
+    case QtInfoMsg:
+      return QStringLiteral("INFO");
+    case QtWarningMsg:
+      return QStringLiteral("WARN");
+    case QtCriticalMsg:
+      return QStringLiteral("ERROR");
+    case QtFatalMsg:
+      return QStringLiteral("FATAL");
+    default:
+      return QStringLiteral("LOG");
+  }
+}
+
+void messageHandler(QtMsgType type, const QMessageLogContext&, const QString& msg)
+{
+  QMutexLocker locker(&g_logMutex);
+  if (!g_logFile || !g_logFile->isOpen()) {
+    return;
+  }
+
+  QTextStream out(g_logFile);
+  out << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " [" << logLevel(type) << "] " << msg << "\n";
+  g_logFile->flush();
+
+  if (type == QtFatalMsg) {
+    abort();
+  }
+}
+
+QString logFilePath()
+{
+  return QDir(xbrowser::appDataRoot()).filePath("xbrowser.log");
+}
+
+void installLogging()
+{
+  static QFile file;
+  file.setFileName(logFilePath());
+  if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+    g_logFile = &file;
+    qInstallMessageHandler(messageHandler);
+    qInfo().noquote() << "Logging to" << file.fileName();
+  }
+}
+}
+
 int main(int argc, char* argv[])
 {
+  ensureQtRuntimePaths();
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   QGuiApplication app(argc, argv);
   QCoreApplication::setOrganizationName("XBrowser");
   QCoreApplication::setApplicationName("XBrowser");
   QCoreApplication::setApplicationVersion(QStringLiteral(XBROWSER_VERSION));
+
+  installLogging();
 
   QQuickStyle::setStyle("Material");
 
@@ -222,6 +360,12 @@ int main(int argc, char* argv[])
   }
 
   QQmlApplicationEngine engine;
+  QStringList qmlWarnings;
+  QObject::connect(&engine, &QQmlApplicationEngine::warnings, &engine, [&qmlWarnings](const QList<QQmlError>& warnings) {
+    for (const auto& w : warnings) {
+      qmlWarnings.push_back(w.toString());
+    }
+  });
   engine.rootContext()->setContextProperty("browser", &browser);
   engine.rootContext()->setContextProperty("commands", &commands);
   engine.rootContext()->setContextProperty("notifications", &notifications);
@@ -233,6 +377,12 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("splitView", &splitView);
   engine.load(QUrl("qrc:/ui/qml/Main.qml"));
   if (engine.rootObjects().isEmpty()) {
+    QString message = QStringLiteral("Failed to load UI (qrc:/ui/qml/Main.qml).");
+    if (!qmlWarnings.isEmpty()) {
+      message += QStringLiteral("\n\nQML errors:\n%1").arg(qmlWarnings.join('\n'));
+    }
+    message += QStringLiteral("\n\nLog: %1").arg(logFilePath());
+    showFatalMessage(message);
     return 1;
   }
 
