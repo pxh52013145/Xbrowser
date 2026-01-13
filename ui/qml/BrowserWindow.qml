@@ -1016,6 +1016,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     workspaces: browser.workspaces
                     settings: browser.settings
+                    popupHost: popupManager
                 }
             }
         }
@@ -1332,14 +1333,8 @@ ApplicationWindow {
 
     Connections {
         target: splitView
-
-        function onEnabledChanged() {
-            syncSplitViews()
-        }
-
-        function onTabsChanged() {
-            syncSplitViews()
-        }
+        onEnabledChanged: syncSplitViews()
+        onTabsChanged: syncSplitViews()
     }
 
     Connections {

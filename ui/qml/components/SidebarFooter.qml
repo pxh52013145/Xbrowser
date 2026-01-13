@@ -8,11 +8,12 @@ Item {
 
     required property var workspaces
     required property var settings
+    required property var popupHost
 
     RowLayout {
         id: row
         anchors.fill: parent
-        spacing: 6
+        spacing: theme.spacing
 
         ToolButton {
             text: settings.sidebarExpanded ? "<" : ">"
@@ -33,8 +34,9 @@ Item {
         }
 
         ToolButton {
-            text: "⋮"
-            menu: workspaceMenu
+            id: workspaceMenuButton
+            text: "⋯"
+            onClicked: root.popupHost.openAtItem(workspaceMenuComponent, workspaceMenuButton)
         }
 
         ToolButton {
@@ -43,24 +45,45 @@ Item {
         }
     }
 
-    Menu {
-        id: workspaceMenu
+    Component {
+        id: workspaceMenuComponent
 
-        MenuItem {
-            text: "Rename Workspace"
-            onTriggered: {
-                if (root.workspaces.activeIndex < 0) {
-                    return
+        Rectangle {
+            color: Qt.rgba(1, 1, 1, 0.98)
+            radius: theme.cornerRadius
+            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.width: 1
+
+            implicitWidth: 220
+            implicitHeight: menuColumn.implicitHeight + theme.spacing * 2
+
+            ColumnLayout {
+                id: menuColumn
+                anchors.fill: parent
+                anchors.margins: theme.spacing
+                spacing: theme.spacing
+
+                Button {
+                    text: "Rename Workspace"
+                    onClicked: {
+                        root.popupHost.close()
+                        if (root.workspaces.activeIndex < 0) {
+                            return
+                        }
+                        renameField.text = root.workspaces.nameAt(root.workspaces.activeIndex)
+                        renameDialog.open()
+                    }
                 }
-                renameField.text = root.workspaces.nameAt(root.workspaces.activeIndex)
-                renameDialog.open()
-            }
-        }
 
-        MenuItem {
-            text: "Delete Workspace"
-            enabled: root.workspaces.count() > 1 && root.workspaces.activeIndex >= 0
-            onTriggered: root.workspaces.closeWorkspace(root.workspaces.activeIndex)
+                Button {
+                    text: "Delete Workspace"
+                    enabled: root.workspaces.count() > 1 && root.workspaces.activeIndex >= 0
+                    onClicked: {
+                        root.popupHost.close()
+                        root.workspaces.closeWorkspace(root.workspaces.activeIndex)
+                    }
+                }
+            }
         }
     }
 
@@ -71,7 +94,7 @@ Item {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         contentItem: ColumnLayout {
-            spacing: 8
+            spacing: theme.spacing
             TextField {
                 id: renameField
                 Layout.fillWidth: true
@@ -87,3 +110,4 @@ Item {
         }
     }
 }
+
