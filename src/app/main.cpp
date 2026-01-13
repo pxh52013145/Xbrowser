@@ -29,6 +29,7 @@
 #include "../core/ThemePackModel.h"
 #include "../core/ToastController.h"
 #include "../engine/webview2/WebView2View.h"
+#include "../platform/windows/WindowChromeController.h"
 
 namespace
 {
@@ -177,6 +178,7 @@ int main(int argc, char* argv[])
     "BrowserController",
     "BrowserController is provided as a singleton instance");
   qmlRegisterType<WebView2View>("XBrowser", 1, 0, "WebView2View");
+  qmlRegisterType<WindowChromeController>("XBrowser", 1, 0, "WindowChromeController");
   qmlRegisterUncreatableType<TabModel>("XBrowser", 1, 0, "TabModel", "TabModel is exposed via BrowserController.tabs");
   qmlRegisterUncreatableType<TabGroupModel>(
     "XBrowser",

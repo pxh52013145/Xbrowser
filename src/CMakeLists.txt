@@ -21,6 +21,13 @@ qt_add_executable(xbrowser
   ../ui/ui.qrc
 )
 
+if(WIN32)
+  target_sources(xbrowser PRIVATE
+    platform/windows/WindowChromeController.cpp
+    platform/windows/WindowChromeController.h
+  )
+endif()
+
 target_include_directories(xbrowser PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
 )

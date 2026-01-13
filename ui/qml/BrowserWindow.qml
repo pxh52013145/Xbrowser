@@ -11,12 +11,16 @@ ApplicationWindow {
     width: 1200
     height: 800
     title: (browser.tabs.activeIndex >= 0 ? browser.tabs.titleAt(browser.tabs.activeIndex) : "XBrowser")
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     property url glanceUrl: ""
     property bool compactTopHover: false
     property bool compactSidebarHover: false
     property bool topBarHovered: false
     property bool sidebarHovered: false
+
+    readonly property int windowControlButtonWidth: 46
+    readonly property int windowControlButtonHeight: 32
 
     readonly property bool showTopBar: browser.settings.addressBarVisible
                                         && (!browser.settings.compactMode || topBarHovered || compactTopHover
@@ -34,6 +38,10 @@ ApplicationWindow {
             GradientStop { position: 0.0; color: theme.backgroundFrom }
             GradientStop { position: 1.0; color: theme.backgroundTo }
         }
+    }
+
+    WindowChromeController {
+        id: windowChrome
     }
 
     menuBar: MenuBar {
@@ -393,6 +401,23 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        windowChrome.attach(root)
+        windowChrome.setCaptionItem(topBar)
+        windowChrome.setCaptionExcludeItems([
+            sidebarButton,
+            backButton,
+            forwardButton,
+            reloadButton,
+            sitePanelButton,
+            addressField,
+            emojiButton,
+            newTabButton,
+            mainMenuButton
+        ])
+        windowChrome.setMinimizeButtonItem(windowMinimizeButton)
+        windowChrome.setMaximizeButtonItem(windowMaximizeButton)
+        windowChrome.setCloseButtonItem(windowCloseButton)
+
         if (browser.tabs.count() === 0) {
             commands.invoke("new-tab", { url: "https://example.com" })
         }
@@ -424,45 +449,62 @@ ApplicationWindow {
 
     header: ToolBar {
         id: topBar
-        visible: showTopBar
-        height: visible ? implicitHeight : 0
+        height: showTopBar ? implicitHeight : root.windowControlButtonHeight
+        leftPadding: 6
+        rightPadding: 0
+        topPadding: 0
+        bottomPadding: 0
 
         HoverHandler {
             onHoveredChanged: root.topBarHovered = hovered
         }
+
         RowLayout {
             anchors.fill: parent
             spacing: 6
 
             ToolButton {
+                id: sidebarButton
+                visible: showTopBar
                 text: browser.settings.sidebarExpanded ? "<" : ">"
                 onClicked: commands.invoke("toggle-sidebar")
             }
 
             ToolButton {
+                id: backButton
+                visible: showTopBar
                 text: "←"
                 enabled: web.canGoBack
                 onClicked: commands.invoke("nav-back")
             }
             ToolButton {
+                id: forwardButton
+                visible: showTopBar
                 text: "→"
                 enabled: web.canGoForward
                 onClicked: commands.invoke("nav-forward")
             }
             ToolButton {
+                id: reloadButton
+                visible: showTopBar
                 text: web.isLoading ? "⟳…" : "⟳"
                 onClicked: commands.invoke("nav-reload")
             }
 
             ToolButton {
                 id: sitePanelButton
+                visible: showTopBar
                 text: "ⓘ"
                 onClicked: popupManager.openAtItem(sitePanelComponent, sitePanelButton)
             }
 
             TextField {
                 id: addressField
+                visible: showTopBar
                 Layout.fillWidth: true
+                Layout.minimumWidth: 240
+                Layout.preferredWidth: 640
+                Layout.maximumWidth: 800
                 placeholderText: "Search or enter address"
                 selectByMouse: true
                 onTextChanged: updateOmnibox()
@@ -480,8 +522,18 @@ ApplicationWindow {
                 }
             }
 
+            Item {
+                id: windowDragRegion
+                Layout.fillWidth: true
+                Layout.minimumWidth: 80
+                Layout.preferredWidth: 200
+                Layout.alignment: Qt.AlignVCenter
+                height: topBar.height
+            }
+
             ToolButton {
                 id: emojiButton
+                visible: showTopBar
                 text: "😊"
                 onClicked: {
                     const pos = emojiButton.mapToItem(root.contentItem, 0, emojiButton.height)
@@ -492,6 +544,8 @@ ApplicationWindow {
             }
 
             ToolButton {
+                id: newTabButton
+                visible: showTopBar
                 text: "+"
                 onClicked: {
                     commands.invoke("new-tab", { url: "about:blank" })
@@ -503,6 +557,71 @@ ApplicationWindow {
                 id: mainMenuButton
                 text: "⋮"
                 onClicked: popupManager.openAtItem(mainMenuComponent, mainMenuButton)
+            }
+
+            Row {
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 0
+
+                Item {
+                    id: windowMinimizeButton
+                    width: root.windowControlButtonWidth
+                    height: topBar.height
+
+                    readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Minimize
+                    readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Minimize
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: pressed ? Qt.rgba(0, 0, 0, 0.12) : (hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "–"
+                        color: "#1f1f1f"
+                        font.pixelSize: 16
+                    }
+                }
+
+                Item {
+                    id: windowMaximizeButton
+                    width: root.windowControlButtonWidth
+                    height: topBar.height
+
+                    readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Maximize
+                    readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Maximize
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: pressed ? Qt.rgba(0, 0, 0, 0.12) : (hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: (root.visibility === Window.Maximized) ? "❐" : "□"
+                        color: "#1f1f1f"
+                        font.pixelSize: 14
+                    }
+                }
+
+                Item {
+                    id: windowCloseButton
+                    width: root.windowControlButtonWidth
+                    height: topBar.height
+
+                    readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Close
+                    readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Close
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: pressed ? "#c50f1f" : (hovered ? "#e81123" : "transparent")
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "×"
+                        color: hovered || pressed ? "#ffffff" : "#1f1f1f"
+                        font.pixelSize: 16
+                    }
+                }
             }
         }
     }
