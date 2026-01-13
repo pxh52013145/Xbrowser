@@ -1,0 +1,17 @@
+<RCC>
+  <qresource prefix="/ui">
+    <file>qml/Main.qml</file>
+    <file>qml/BrowserWindow.qml</file>
+    <file>qml/components/Shortcuts.qml</file>
+    <file>qml/components/OverlayHost.qml</file>
+    <file>qml/components/PopupManager.qml</file>
+    <file>qml/components/SidebarFooter.qml</file>
+    <file>qml/components/NotificationsStack.qml</file>
+    <file>qml/components/ThemesDialog.qml</file>
+    <file>qml/components/DownloadsDialog.qml</file>
+    <file>qml/components/MediaControls.qml</file>
+    <file>qml/components/EmojiPicker.qml</file>
+    <file>qml/components/OnboardingDialog.qml</file>
+    <file>qml/components/ToastHost.qml</file>
+  </qresource>
+</RCC>

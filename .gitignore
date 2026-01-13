@@ -1,0 +1,45 @@
+# Build outputs (recommended: out-of-source builds in repo root)
+/build*/
+/out*/
+/cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+
+# Qt Creator
+*.user
+*.user.*
+*.qmlc
+*.jsc
+*.autosave
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.suo
+*.opensdf
+*.sdf
+*.userosscache
+*.sln.docstates
+
+# Visual Studio build outputs (in-source builds)
+Debug/
+Release/
+x64/
+Win32/
+
+# Editors
+.vscode/
+.idea/
+
+# Third-party references (downloaded snapshots)
+/reference/zen-browser-src/
+
+# Logs
+/aqtinstall.log

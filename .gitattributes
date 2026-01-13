@@ -1,0 +1,9 @@
+* text=auto
+
+# Treat common assets as binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
