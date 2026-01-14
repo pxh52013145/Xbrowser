@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QColor>
 
 class TabGroupModel : public QAbstractListModel
 {
@@ -12,6 +13,7 @@ public:
     GroupIdRole = Qt::UserRole + 1,
     NameRole,
     CollapsedRole,
+    ColorRole,
   };
   Q_ENUM(Role)
 
@@ -23,7 +25,7 @@ public:
 
   Q_INVOKABLE int count() const;
   Q_INVOKABLE int addGroup(const QString& name);
-  Q_INVOKABLE int addGroupWithId(int groupId, const QString& name, bool collapsed = false);
+  Q_INVOKABLE int addGroupWithId(int groupId, const QString& name, bool collapsed = false, const QColor& color = {});
   Q_INVOKABLE void removeGroup(int index);
   Q_INVOKABLE void clear();
 
@@ -34,12 +36,16 @@ public:
   Q_INVOKABLE bool collapsedAt(int index) const;
   Q_INVOKABLE void setCollapsedAt(int index, bool collapsed);
 
+  Q_INVOKABLE QColor colorAt(int index) const;
+  Q_INVOKABLE void setColorAt(int index, const QColor& color);
+
 private:
   struct GroupEntry
   {
     int id = 0;
     QString name;
     bool collapsed = false;
+    QColor color;
   };
 
   QVector<GroupEntry> m_groups;

@@ -2,80 +2,106 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-Dialog {
+Item {
     id: root
-    title: "Downloads"
-    modal: true
-    standardButtons: Dialog.Close
+    anchors.fill: parent
 
     required property var downloads
 
-    implicitWidth: 620
-    implicitHeight: 480
+    signal closeRequested()
 
-    contentItem: ColumnLayout {
-        anchors.fill: parent
-        spacing: theme.spacing
+    Rectangle {
+        id: panel
+        anchors.centerIn: parent
+        width: Math.min(620, parent.width - 80)
+        height: Math.min(480, parent.height - 80)
+        radius: theme.cornerRadius
+        color: Qt.rgba(1, 1, 1, 0.98)
+        border.color: Qt.rgba(0, 0, 0, 0.12)
+        border.width: 1
 
-        RowLayout {
-            Layout.fillWidth: true
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: theme.spacing
             spacing: theme.spacing
 
-            Label {
+            RowLayout {
                 Layout.fillWidth: true
-                text: downloads.activeCount > 0 ? ("Active: " + downloads.activeCount) : "No active downloads"
-                opacity: 0.8
+                spacing: theme.spacing
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Downloads"
+                    font.bold: true
+                    font.pixelSize: 14
+                }
+
+                ToolButton {
+                    text: "×"
+                    onClicked: root.closeRequested()
+                }
             }
 
-            Button {
-                text: "Clear Finished"
-                enabled: downloads.count() > downloads.activeCount
-                onClicked: downloads.clearFinished()
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacing
+
+                Label {
+                    Layout.fillWidth: true
+                    text: downloads.activeCount > 0 ? ("Active: " + downloads.activeCount) : "No active downloads"
+                    opacity: 0.8
+                }
+
+                Button {
+                    text: "Clear Finished"
+                    enabled: downloads.count() > downloads.activeCount
+                    onClicked: downloads.clearFinished()
+                }
             }
-        }
 
-        Frame {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            Frame {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-            ListView {
-                anchors.fill: parent
-                clip: true
-                model: downloads
+                ListView {
+                    anchors.fill: parent
+                    clip: true
+                    model: downloads
 
-                delegate: ItemDelegate {
-                    width: ListView.view.width
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
 
-                    contentItem: RowLayout {
-                        spacing: theme.spacing
+                        contentItem: RowLayout {
+                            spacing: theme.spacing
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Math.max(2, Math.round(theme.spacing / 4))
-
-                            Label {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                text: uri && uri.length > 0 ? uri : filePath
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: state
-                                opacity: 0.7
-                                font.pixelSize: 12
-                            }
-                        }
+                                spacing: Math.max(2, Math.round(theme.spacing / 4))
 
-                        Button {
-                            text: "Open"
-                            enabled: filePath && filePath.length > 0
-                            onClicked: downloads.openFile(downloadId)
-                        }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: uri && uri.length > 0 ? uri : filePath
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: state
+                                    opacity: 0.7
+                                    font.pixelSize: 12
+                                }
+                            }
 
-                        Button {
-                            text: "Folder"
-                            enabled: filePath && filePath.length > 0
-                            onClicked: downloads.openFolder(downloadId)
+                            Button {
+                                text: "Open"
+                                enabled: filePath && filePath.length > 0
+                                onClicked: downloads.openFile(downloadId)
+                            }
+
+                            Button {
+                                text: "Folder"
+                                enabled: filePath && filePath.length > 0
+                                onClicked: downloads.openFolder(downloadId)
+                            }
                         }
                     }
                 }

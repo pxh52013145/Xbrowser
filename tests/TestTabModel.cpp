@@ -154,6 +154,86 @@ private slots:
     QCOMPARE(model.activeIndex(), 0);
   }
 
+  void selection_tracksByTabIdAndSurvivesMoves()
+  {
+    TabModel model;
+    model.addTabWithId(1, QUrl("https://a.example"), "A", false);
+    model.addTabWithId(2, QUrl("https://b.example"), "B", false);
+    model.addTabWithId(3, QUrl("https://c.example"), "C", false);
+
+    QCOMPARE(model.selectedCount(), 0);
+    QCOMPARE(model.hasSelection(), false);
+
+    QSignalSpy selectionSpy(&model, &TabModel::selectionChanged);
+
+    model.selectOnlyById(2);
+    QCOMPARE(model.selectedCount(), 1);
+    QCOMPARE(model.hasSelection(), true);
+    QCOMPARE(selectionSpy.count(), 1);
+
+    QVERIFY(model.isSelectedById(2));
+    QVERIFY(!model.isSelectedById(1));
+    QVERIFY(!model.isSelectedById(3));
+
+    QVERIFY(model.data(model.index(0, 0), TabModel::IsSelectedRole).toBool() == false);
+    QVERIFY(model.data(model.index(1, 0), TabModel::IsSelectedRole).toBool() == true);
+    QVERIFY(model.data(model.index(2, 0), TabModel::IsSelectedRole).toBool() == false);
+
+    model.moveTab(0, 2);
+    QVERIFY(model.isSelectedById(2));
+    QCOMPARE(model.indexOfTabId(2), 0);
+
+    model.toggleSelectedById(3);
+    QCOMPARE(model.selectedCount(), 2);
+    QVERIFY(model.isSelectedById(2));
+    QVERIFY(model.isSelectedById(3));
+
+    QVariantList expected;
+    expected << 2 << 3;
+    QCOMPARE(model.selectedTabIds(), expected);
+
+    model.clearSelection();
+    QCOMPARE(model.selectedCount(), 0);
+    QCOMPARE(model.hasSelection(), false);
+  }
+
+  void selection_isClearedForClosedTabs()
+  {
+    TabModel model;
+    model.addTabWithId(10, QUrl("https://a.example"), "A", false);
+    model.addTabWithId(11, QUrl("https://b.example"), "B", false);
+    QCOMPARE(model.count(), 2);
+
+    model.selectOnlyById(11);
+    QCOMPARE(model.selectedCount(), 1);
+    QVERIFY(model.isSelectedById(11));
+
+    QSignalSpy selectionSpy(&model, &TabModel::selectionChanged);
+
+    model.closeTab(model.indexOfTabId(11));
+    QCOMPARE(model.count(), 1);
+    QCOMPARE(model.selectedCount(), 0);
+    QCOMPARE(model.hasSelection(), false);
+    QVERIFY(selectionSpy.count() >= 1);
+  }
+
+  void restoreLastClosedTab_reopensMostRecent()
+  {
+    TabModel model;
+    model.addTab(QUrl("https://a.example"));
+    model.addTab(QUrl("https://b.example"));
+    QCOMPARE(model.count(), 2);
+
+    model.closeTab(1);
+    QCOMPARE(model.count(), 1);
+    QVERIFY(model.canRestoreLastClosedTab());
+
+    const int idx = model.restoreLastClosedTab();
+    QCOMPARE(idx, 1);
+    QCOMPARE(model.count(), 2);
+    QCOMPARE(model.urlAt(1), QUrl("https://b.example"));
+  }
+
   void browserController_forwardsToTabModel()
   {
     BrowserController browser;

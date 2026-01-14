@@ -3,8 +3,16 @@
 #include <Windows.h>
 
 #include "core/AppPaths.h"
+#include "core/SitePermissionsStore.h"
 
+#if defined(__has_attribute)
+#undef __has_attribute
+#endif
+#include <WebView2EnvironmentOptions.h>
+
+#include <QByteArray>
 #include <QDir>
+#include <QFile>
 #include <QQuickWindow>
 #include <QUrl>
 
@@ -15,6 +23,65 @@ namespace
 std::wstring toWide(const QString& s)
 {
   return s.toStdWString();
+}
+
+QByteArray readStream(IStream* stream)
+{
+  if (!stream) {
+    return {};
+  }
+
+  LARGE_INTEGER zero{};
+  stream->Seek(zero, STREAM_SEEK_SET, nullptr);
+
+  QByteArray data;
+  char buffer[4096];
+  ULONG bytesRead = 0;
+  while (SUCCEEDED(stream->Read(buffer, sizeof(buffer), &bytesRead)) && bytesRead > 0) {
+    data.append(buffer, static_cast<int>(bytesRead));
+  }
+  return data;
+}
+
+QString hresultMessage(HRESULT hr)
+{
+  wchar_t* buffer = nullptr;
+  const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+  const DWORD langId = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
+
+  const DWORD len = FormatMessageW(flags, nullptr, static_cast<DWORD>(hr), langId, reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+  QString message;
+  if (len > 0 && buffer) {
+    message = QString::fromWCharArray(buffer, static_cast<int>(len)).trimmed();
+    LocalFree(buffer);
+  }
+
+  const QString hex = QStringLiteral("0x%1")
+                        .arg(QString::number(static_cast<qulonglong>(static_cast<ULONG>(hr)), 16).toUpper(), 8, QLatin1Char('0'));
+  if (message.isEmpty()) {
+    return hex;
+  }
+  return QStringLiteral("%1 (%2)").arg(hex, message);
+}
+
+struct SharedWebView2EnvironmentState
+{
+  Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment;
+  bool initializing = false;
+  HRESULT lastResult = S_OK;
+  QString lastError;
+  QVector<QPointer<WebView2View>> waiters;
+};
+
+SharedWebView2EnvironmentState& sharedEnvironment()
+{
+  static SharedWebView2EnvironmentState state;
+  return state;
+}
+
+QString webView2UserDataDir()
+{
+  return QDir(xbrowser::appDataRoot()).filePath("webview2");
 }
 
 QUrl normalizeUserInput(const QUrl& input)
@@ -41,6 +108,16 @@ WebView2View::WebView2View(QQuickItem* parent)
 
 WebView2View::~WebView2View()
 {
+  for (auto& pending : m_pendingPermissions) {
+    if (pending.args) {
+      pending.args->put_State(COREWEBVIEW2_PERMISSION_STATE_DEFAULT);
+    }
+    if (pending.deferral) {
+      pending.deferral->Complete();
+    }
+  }
+  m_pendingPermissions.clear();
+
   if (m_webView) {
     m_webView->remove_DocumentTitleChanged(m_titleChangedToken);
     m_webView->remove_SourceChanged(m_sourceChangedToken);
@@ -49,9 +126,24 @@ WebView2View::~WebView2View()
     m_webView->remove_HistoryChanged(m_historyChangedToken);
     m_webView->remove_WebMessageReceived(m_webMessageReceivedToken);
 
+    Microsoft::WRL::ComPtr<ICoreWebView2_11> webView11;
+    if (SUCCEEDED(m_webView.As(&webView11)) && webView11) {
+      webView11->remove_ContextMenuRequested(m_contextMenuRequestedToken);
+    }
+
     Microsoft::WRL::ComPtr<ICoreWebView2_4> webView4;
     if (SUCCEEDED(m_webView.As(&webView4)) && webView4) {
       webView4->remove_DownloadStarting(m_downloadStartingToken);
+    }
+
+    Microsoft::WRL::ComPtr<ICoreWebView2_3> webView3;
+    if (SUCCEEDED(m_webView.As(&webView3)) && webView3) {
+      webView3->remove_PermissionRequested(m_permissionRequestedToken);
+    }
+
+    Microsoft::WRL::ComPtr<ICoreWebView2_15> webView15;
+    if (SUCCEEDED(m_webView.As(&webView15)) && webView15) {
+      webView15->remove_FaviconChanged(m_faviconChangedToken);
     }
 
     Microsoft::WRL::ComPtr<ICoreWebView2_8> webView8;
@@ -67,6 +159,7 @@ WebView2View::~WebView2View()
     }
   }
   if (m_controller) {
+    m_controller->remove_GotFocus(m_gotFocusToken);
     m_controller->Close();
   }
 }
@@ -74,6 +167,16 @@ WebView2View::~WebView2View()
 bool WebView2View::initialized() const
 {
   return m_initialized;
+}
+
+QString WebView2View::initError() const
+{
+  return m_initError;
+}
+
+int WebView2View::initErrorCode() const
+{
+  return static_cast<int>(m_initErrorCode);
 }
 
 bool WebView2View::isLoading() const
@@ -101,6 +204,11 @@ QString WebView2View::title() const
   return m_title;
 }
 
+QUrl WebView2View::faviconUrl() const
+{
+  return m_faviconUrl;
+}
+
 bool WebView2View::documentPlayingAudio() const
 {
   return m_documentPlayingAudio;
@@ -109,6 +217,11 @@ bool WebView2View::documentPlayingAudio() const
 bool WebView2View::muted() const
 {
   return m_muted;
+}
+
+Microsoft::WRL::ComPtr<ICoreWebView2> WebView2View::coreWebView() const
+{
+  return m_webView;
 }
 
 void WebView2View::navigate(const QUrl& url)
@@ -170,6 +283,16 @@ void WebView2View::setMuted(bool muted)
   webView8->put_IsMuted(muted ? TRUE : FALSE);
 }
 
+void WebView2View::retryInitialize()
+{
+  if (m_initializing || m_initialized) {
+    return;
+  }
+
+  setInitError(S_OK, {});
+  tryInitialize();
+}
+
 void WebView2View::addScriptOnDocumentCreated(const QString& script)
 {
   const QString trimmed = script.trimmed();
@@ -228,6 +351,42 @@ void WebView2View::postWebMessageAsJson(const QString& json)
   m_webView->PostWebMessageAsJson(toWide(trimmed).c_str());
 }
 
+void WebView2View::respondToPermissionRequest(int requestId, int state, bool remember)
+{
+  if (requestId <= 0) {
+    return;
+  }
+
+  COREWEBVIEW2_PERMISSION_STATE resolved = COREWEBVIEW2_PERMISSION_STATE_DEFAULT;
+  if (state == COREWEBVIEW2_PERMISSION_STATE_ALLOW) {
+    resolved = COREWEBVIEW2_PERMISSION_STATE_ALLOW;
+  } else if (state == COREWEBVIEW2_PERMISSION_STATE_DENY) {
+    resolved = COREWEBVIEW2_PERMISSION_STATE_DENY;
+  }
+
+  for (int i = 0; i < m_pendingPermissions.size(); ++i) {
+    auto pending = m_pendingPermissions[i];
+    if (pending.id != requestId) {
+      continue;
+    }
+
+    if (pending.args) {
+      pending.args->put_State(resolved);
+    }
+
+    if (remember) {
+      SitePermissionsStore::instance().setDecision(pending.origin, static_cast<int>(pending.kind), static_cast<int>(resolved));
+    }
+
+    if (pending.deferral) {
+      pending.deferral->Complete();
+    }
+
+    m_pendingPermissions.removeAt(i);
+    return;
+  }
+}
+
 void WebView2View::handleWindowChanged(QQuickWindow* window)
 {
   if (!window) {
@@ -246,207 +405,460 @@ void WebView2View::tryInitialize()
   }
 
   m_initializing = true;
-  const HWND parentHwnd = reinterpret_cast<HWND>(window()->winId());
 
-  const QString userDataDir = QDir(xbrowser::appDataRoot()).filePath("webview2");
+  auto& shared = sharedEnvironment();
+  if (shared.environment) {
+    startControllerCreation(shared.environment.Get());
+    return;
+  }
+
+  shared.waiters.push_back(this);
+  if (shared.initializing) {
+    return;
+  }
+  shared.initializing = true;
+
+  const QString userDataDir = webView2UserDataDir();
   QDir().mkpath(userDataDir);
 
   const std::wstring userDataFolder = toWide(QDir::toNativeSeparators(userDataDir));
 
-  CreateCoreWebView2EnvironmentWithOptions(
+  Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions> options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+  Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions6> options6;
+  if (options && SUCCEEDED(options.As(&options6)) && options6) {
+    options6->put_AreBrowserExtensionsEnabled(TRUE);
+  }
+
+  const HRESULT beginResult = CreateCoreWebView2EnvironmentWithOptions(
     nullptr,
     userDataFolder.c_str(),
-    nullptr,
+    options.Get(),
     Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-      [this, parentHwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-        if (FAILED(result) || !env) {
-          m_initializing = false;
+      [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+        auto& shared = sharedEnvironment();
+        shared.initializing = false;
+        shared.lastResult = result;
+
+        if (SUCCEEDED(result) && env) {
+          shared.environment = env;
+          shared.lastError.clear();
+        } else {
+          shared.environment.Reset();
+          const QString detail = hresultMessage(result);
+          if (result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || result == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) {
+            shared.lastError =
+              QStringLiteral("WebView2 Runtime not found. Install: https://go.microsoft.com/fwlink/p/?LinkId=2124703. %1").arg(detail);
+          } else {
+            shared.lastError = detail;
+          }
+        }
+
+        const QVector<QPointer<WebView2View>> waiters = shared.waiters;
+        shared.waiters.clear();
+
+        for (const QPointer<WebView2View>& waiter : waiters) {
+          if (waiter) {
+            waiter->startControllerCreation(shared.environment.Get());
+          }
+        }
+
+        return S_OK;
+      })
+      .Get());
+
+  if (FAILED(beginResult)) {
+    auto& shared = sharedEnvironment();
+    shared.initializing = false;
+    shared.lastResult = beginResult;
+
+    const QString detail = hresultMessage(beginResult);
+    if (beginResult == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || beginResult == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) {
+      shared.lastError =
+        QStringLiteral("WebView2 Runtime not found. Install: https://go.microsoft.com/fwlink/p/?LinkId=2124703. %1").arg(detail);
+    } else {
+      shared.lastError = detail;
+    }
+
+    const QVector<QPointer<WebView2View>> waiters = shared.waiters;
+    shared.waiters.clear();
+
+    for (const QPointer<WebView2View>& waiter : waiters) {
+      if (waiter) {
+        waiter->startControllerCreation(nullptr);
+      }
+    }
+  }
+}
+
+void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
+{
+  if (m_initialized) {
+    m_initializing = false;
+    return;
+  }
+
+  if (!window()) {
+    m_initializing = false;
+    return;
+  }
+
+  if (!env) {
+    m_initializing = false;
+
+    const auto& shared = sharedEnvironment();
+    if (FAILED(shared.lastResult)) {
+      setInitError(shared.lastResult, shared.lastError.isEmpty() ? hresultMessage(shared.lastResult) : shared.lastError);
+    } else {
+      setInitError(E_FAIL, QStringLiteral("WebView2 environment is unavailable."));
+    }
+    return;
+  }
+
+  setInitError(S_OK, {});
+
+  const HWND parentHwnd = reinterpret_cast<HWND>(window()->winId());
+  m_environment = env;
+
+  env->CreateCoreWebView2Controller(
+    parentHwnd,
+    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+      [this](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
+        m_initializing = false;
+        if (FAILED(controllerResult) || !controller) {
+          const HRESULT hr = FAILED(controllerResult) ? controllerResult : E_FAIL;
+          setInitError(hr, QStringLiteral("Failed to create WebView2 controller: %1").arg(hresultMessage(hr)));
           return S_OK;
         }
 
-        m_environment = env;
-        env->CreateCoreWebView2Controller(
-          parentHwnd,
-          Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-            [this](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
-              m_initializing = false;
-              if (FAILED(controllerResult) || !controller) {
-                return S_OK;
+        m_controller = controller;
+        m_controller->get_CoreWebView2(&m_webView);
+        if (!m_webView) {
+          setInitError(E_FAIL, QStringLiteral("Failed to obtain WebView2 instance."));
+          return S_OK;
+        }
+
+        setInitError(S_OK, {});
+
+        m_controller->add_GotFocus(
+          Callback<ICoreWebView2FocusChangedEventHandler>(
+            [this](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+              emit focusReceived();
+              return S_OK;
+            })
+            .Get(),
+          &m_gotFocusToken);
+
+        m_webView->add_DocumentTitleChanged(
+          Callback<ICoreWebView2DocumentTitleChangedEventHandler>(
+            [this](ICoreWebView2* sender, IUnknown*) -> HRESULT {
+              LPWSTR title = nullptr;
+              if (sender && SUCCEEDED(sender->get_DocumentTitle(&title)) && title) {
+                setTitle(QString::fromWCharArray(title));
+                CoTaskMemFree(title);
               }
+              return S_OK;
+            })
+            .Get(),
+          &m_titleChangedToken);
 
-              m_controller = controller;
-              m_controller->get_CoreWebView2(&m_webView);
-              if (!m_webView) {
-                return S_OK;
+        m_webView->add_SourceChanged(
+          Callback<ICoreWebView2SourceChangedEventHandler>(
+            [this](ICoreWebView2* sender, ICoreWebView2SourceChangedEventArgs*) -> HRESULT {
+              LPWSTR uri = nullptr;
+              if (sender && SUCCEEDED(sender->get_Source(&uri)) && uri) {
+                setCurrentUrl(QUrl(QString::fromWCharArray(uri)));
+                CoTaskMemFree(uri);
               }
+              return S_OK;
+            })
+            .Get(),
+          &m_sourceChangedToken);
 
-              m_webView->add_DocumentTitleChanged(
-                Callback<ICoreWebView2DocumentTitleChangedEventHandler>(
-                  [this](ICoreWebView2* sender, IUnknown*) -> HRESULT {
-                    LPWSTR title = nullptr;
-                    if (sender && SUCCEEDED(sender->get_DocumentTitle(&title)) && title) {
-                      setTitle(QString::fromWCharArray(title));
-                      CoTaskMemFree(title);
-                    }
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_titleChangedToken);
+        m_webView->add_NavigationStarting(
+          Callback<ICoreWebView2NavigationStartingEventHandler>(
+            [this](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT {
+              setIsLoading(true);
+              return S_OK;
+            })
+            .Get(),
+          &m_navigationStartingToken);
 
-              m_webView->add_SourceChanged(
-                Callback<ICoreWebView2SourceChangedEventHandler>(
-                  [this](ICoreWebView2* sender, ICoreWebView2SourceChangedEventArgs*) -> HRESULT {
-                    LPWSTR uri = nullptr;
-                    if (sender && SUCCEEDED(sender->get_Source(&uri)) && uri) {
-                      setCurrentUrl(QUrl(QString::fromWCharArray(uri)));
-                      CoTaskMemFree(uri);
-                    }
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_sourceChangedToken);
-
-              m_webView->add_NavigationStarting(
-                Callback<ICoreWebView2NavigationStartingEventHandler>(
-                  [this](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT {
-                    setIsLoading(true);
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_navigationStartingToken);
-
-              m_webView->add_NavigationCompleted(
-                Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                  [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
-                    setIsLoading(false);
-                    updateNavigationState();
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_navigationCompletedToken);
-
-              m_webView->add_HistoryChanged(
-                Callback<ICoreWebView2HistoryChangedEventHandler>(
-                  [this](ICoreWebView2*, IUnknown*) -> HRESULT {
-                    updateNavigationState();
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_historyChangedToken);
-
-              Microsoft::WRL::ComPtr<ICoreWebView2_8> webView8;
-              if (SUCCEEDED(m_webView.As(&webView8)) && webView8) {
-                webView8->add_IsDocumentPlayingAudioChanged(
-                  Callback<ICoreWebView2IsDocumentPlayingAudioChangedEventHandler>(
-                    [this](ICoreWebView2*, IUnknown*) -> HRESULT {
-                      updateAudioState();
-                      return S_OK;
-                    })
-                    .Get(),
-                  &m_audioChangedToken);
-
-                webView8->add_IsMutedChanged(
-                  Callback<ICoreWebView2IsMutedChangedEventHandler>(
-                    [this](ICoreWebView2*, IUnknown*) -> HRESULT {
-                      updateAudioState();
-                      return S_OK;
-                    })
-                    .Get(),
-                  &m_mutedChangedToken);
-              }
-
-              m_webView->add_WebMessageReceived(
-                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                  [this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                    if (!args) {
-                      return S_OK;
-                    }
-
-                    LPWSTR json = nullptr;
-                    if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) {
-                      emit webMessageReceived(QString::fromWCharArray(json));
-                      CoTaskMemFree(json);
-                    }
-
-                    return S_OK;
-                  })
-                  .Get(),
-                &m_webMessageReceivedToken);
-
-              Microsoft::WRL::ComPtr<ICoreWebView2_4> webView4;
-              if (SUCCEEDED(m_webView.As(&webView4)) && webView4) {
-                webView4->add_DownloadStarting(
-                  Callback<ICoreWebView2DownloadStartingEventHandler>(
-                    [this](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
-                      if (!args) {
-                        return S_OK;
-                      }
-
-                      Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> download;
-                      args->get_DownloadOperation(&download);
-                      if (!download) {
-                        return S_OK;
-                      }
-
-                      QString uriStr;
-                      LPWSTR uri = nullptr;
-                      if (SUCCEEDED(download->get_Uri(&uri)) && uri) {
-                        uriStr = QString::fromWCharArray(uri);
-                        CoTaskMemFree(uri);
-                      }
-
-                      QString filePathStr;
-                      LPWSTR filePath = nullptr;
-                      if (SUCCEEDED(args->get_ResultFilePath(&filePath)) && filePath) {
-                        filePathStr = QString::fromWCharArray(filePath);
-                        CoTaskMemFree(filePath);
-                      }
-
-                      emit downloadStarted(uriStr, filePathStr);
-
-                      const int subscriptionId = m_nextDownloadSubscriptionId++;
-                      DownloadSubscription sub;
-                      sub.id = subscriptionId;
-                      sub.operation = download;
-                      sub.uri = uriStr;
-                      sub.filePath = filePathStr;
-
-                      download->add_StateChanged(
-                        Callback<ICoreWebView2StateChangedEventHandler>(
-                          [this, subscriptionId](ICoreWebView2DownloadOperation* sender, IUnknown*) -> HRESULT {
-                            handleDownloadStateChanged(subscriptionId, sender);
-                            return S_OK;
-                          })
-                          .Get(),
-                        &sub.stateChangedToken);
-
-                      m_downloadSubscriptions.push_back(sub);
-
-                      return S_OK;
-                    })
-                    .Get(),
-                  &m_downloadStartingToken);
-              }
-
-              updateBounds();
-              updateVisibility();
+        m_webView->add_NavigationCompleted(
+          Callback<ICoreWebView2NavigationCompletedEventHandler>(
+            [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+              setIsLoading(false);
               updateNavigationState();
-              updateAudioState();
+              return S_OK;
+            })
+            .Get(),
+          &m_navigationCompletedToken);
 
-              m_initialized = true;
-              emit initializedChanged();
+        m_webView->add_HistoryChanged(
+          Callback<ICoreWebView2HistoryChangedEventHandler>(
+            [this](ICoreWebView2*, IUnknown*) -> HRESULT {
+              updateNavigationState();
+              return S_OK;
+            })
+            .Get(),
+          &m_historyChangedToken);
 
-              flushPendingScripts();
+        Microsoft::WRL::ComPtr<ICoreWebView2_15> webView15;
+        if (SUCCEEDED(m_webView.As(&webView15)) && webView15) {
+          webView15->add_FaviconChanged(
+            Callback<ICoreWebView2FaviconChangedEventHandler>(
+              [this](ICoreWebView2* sender, IUnknown*) -> HRESULT {
+                if (!sender) {
+                  return S_OK;
+                }
 
-              const QUrl pending = m_pendingNavigate;
-              m_pendingNavigate = {};
-              if (pending.isValid()) {
-                navigate(pending);
+                Microsoft::WRL::ComPtr<ICoreWebView2_15> sender15;
+                if (FAILED(sender->QueryInterface(IID_PPV_ARGS(&sender15))) || !sender15) {
+                  return S_OK;
+                }
+
+                sender15->GetFavicon(
+                  COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
+                  Callback<ICoreWebView2GetFaviconCompletedHandler>(
+                    [this, sender15](HRESULT error, IStream* result) -> HRESULT {
+                      if (FAILED(error) || !result) {
+                        LPWSTR uri = nullptr;
+                        if (SUCCEEDED(sender15->get_FaviconUri(&uri)) && uri) {
+                          setFaviconUrl(QUrl(QString::fromWCharArray(uri)));
+                          CoTaskMemFree(uri);
+                        }
+                        return S_OK;
+                      }
+
+                      const QByteArray bytes = readStream(result);
+                      if (bytes.isEmpty()) {
+                        return S_OK;
+                      }
+
+                      const QString dataUrl = QStringLiteral("data:image/png;base64,%1")
+                                                .arg(QString::fromLatin1(bytes.toBase64()));
+                      setFaviconUrl(QUrl(dataUrl));
+                      return S_OK;
+                    })
+                    .Get());
+
+                return S_OK;
+              })
+              .Get(),
+            &m_faviconChangedToken);
+
+          LPWSTR uri = nullptr;
+          if (SUCCEEDED(webView15->get_FaviconUri(&uri)) && uri) {
+            setFaviconUrl(QUrl(QString::fromWCharArray(uri)));
+            CoTaskMemFree(uri);
+          }
+        }
+
+        Microsoft::WRL::ComPtr<ICoreWebView2_8> webView8;
+        if (SUCCEEDED(m_webView.As(&webView8)) && webView8) {
+          webView8->add_IsDocumentPlayingAudioChanged(
+            Callback<ICoreWebView2IsDocumentPlayingAudioChangedEventHandler>(
+              [this](ICoreWebView2*, IUnknown*) -> HRESULT {
+                updateAudioState();
+                return S_OK;
+              })
+              .Get(),
+            &m_audioChangedToken);
+
+          webView8->add_IsMutedChanged(
+            Callback<ICoreWebView2IsMutedChangedEventHandler>(
+              [this](ICoreWebView2*, IUnknown*) -> HRESULT {
+                updateAudioState();
+                return S_OK;
+              })
+              .Get(),
+            &m_mutedChangedToken);
+        }
+
+        m_webView->add_WebMessageReceived(
+          Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+            [this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+              if (!args) {
+                return S_OK;
+              }
+
+              LPWSTR json = nullptr;
+              if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) {
+                emit webMessageReceived(QString::fromWCharArray(json));
+                CoTaskMemFree(json);
               }
 
               return S_OK;
             })
-            .Get());
+            .Get(),
+          &m_webMessageReceivedToken);
+
+        Microsoft::WRL::ComPtr<ICoreWebView2_11> webView11;
+        if (SUCCEEDED(m_webView.As(&webView11)) && webView11) {
+          webView11->add_ContextMenuRequested(
+            Callback<ICoreWebView2ContextMenuRequestedEventHandler>(
+              [this](ICoreWebView2*, ICoreWebView2ContextMenuRequestedEventArgs* args) -> HRESULT {
+                if (!args || !window()) {
+                  return S_OK;
+                }
+
+                POINT point{};
+                if (FAILED(args->get_Location(&point))) {
+                  return S_OK;
+                }
+
+                const qreal dpr = window()->devicePixelRatio();
+                const QPointF scenePos = mapToScene(QPointF(point.x / dpr, point.y / dpr));
+
+                QVariantMap info;
+                info.insert("x", scenePos.x());
+                info.insert("y", scenePos.y());
+
+                Microsoft::WRL::ComPtr<ICoreWebView2ContextMenuTarget> target;
+                if (SUCCEEDED(args->get_ContextMenuTarget(&target)) && target) {
+                  COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND kind{};
+                  if (SUCCEEDED(target->get_Kind(&kind))) {
+                    info.insert("targetKind", static_cast<int>(kind));
+                  }
+
+                  LPWSTR linkUri = nullptr;
+                  if (SUCCEEDED(target->get_LinkUri(&linkUri)) && linkUri) {
+                    info.insert("linkUri", QString::fromWCharArray(linkUri));
+                    CoTaskMemFree(linkUri);
+                  }
+
+                  LPWSTR srcUri = nullptr;
+                  if (SUCCEEDED(target->get_SourceUri(&srcUri)) && srcUri) {
+                    info.insert("sourceUri", QString::fromWCharArray(srcUri));
+                    CoTaskMemFree(srcUri);
+                  }
+                }
+
+                args->put_Handled(TRUE);
+                emit contextMenuRequested(info);
+                return S_OK;
+              })
+              .Get(),
+            &m_contextMenuRequestedToken);
+        }
+
+        Microsoft::WRL::ComPtr<ICoreWebView2_3> webView3;
+        if (SUCCEEDED(m_webView.As(&webView3)) && webView3) {
+          webView3->add_PermissionRequested(
+            Callback<ICoreWebView2PermissionRequestedEventHandler>(
+              [this](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT {
+                if (!args) {
+                  return S_OK;
+                }
+
+                COREWEBVIEW2_PERMISSION_KIND kind{};
+                args->get_PermissionKind(&kind);
+
+                BOOL userInitiated = FALSE;
+                args->get_IsUserInitiated(&userInitiated);
+
+                QString uriStr;
+                LPWSTR uri = nullptr;
+                if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
+                  uriStr = QString::fromWCharArray(uri);
+                  CoTaskMemFree(uri);
+                }
+                const QString origin = SitePermissionsStore::normalizeOrigin(uriStr);
+
+                const int remembered = SitePermissionsStore::instance().decision(origin, static_cast<int>(kind));
+                if (remembered == COREWEBVIEW2_PERMISSION_STATE_ALLOW || remembered == COREWEBVIEW2_PERMISSION_STATE_DENY) {
+                  args->put_State(static_cast<COREWEBVIEW2_PERMISSION_STATE>(remembered));
+                  return S_OK;
+                }
+
+                Microsoft::WRL::ComPtr<ICoreWebView2Deferral> deferral;
+                args->GetDeferral(&deferral);
+
+                const int requestId = m_nextPermissionRequestId++;
+                PendingPermissionRequest pending;
+                pending.id = requestId;
+                pending.origin = origin;
+                pending.kind = kind;
+                pending.args = args;
+                pending.deferral = deferral;
+                m_pendingPermissions.push_back(pending);
+
+                emit permissionRequested(requestId, origin, static_cast<int>(kind), userInitiated == TRUE);
+                return S_OK;
+              })
+              .Get(),
+            &m_permissionRequestedToken);
+        }
+
+        Microsoft::WRL::ComPtr<ICoreWebView2_4> webView4;
+        if (SUCCEEDED(m_webView.As(&webView4)) && webView4) {
+          webView4->add_DownloadStarting(
+            Callback<ICoreWebView2DownloadStartingEventHandler>(
+              [this](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
+                if (!args) {
+                  return S_OK;
+                }
+
+                Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> download;
+                args->get_DownloadOperation(&download);
+                if (!download) {
+                  return S_OK;
+                }
+
+                QString uriStr;
+                LPWSTR uri = nullptr;
+                if (SUCCEEDED(download->get_Uri(&uri)) && uri) {
+                  uriStr = QString::fromWCharArray(uri);
+                  CoTaskMemFree(uri);
+                }
+
+                QString filePathStr;
+                LPWSTR filePath = nullptr;
+                if (SUCCEEDED(args->get_ResultFilePath(&filePath)) && filePath) {
+                  filePathStr = QString::fromWCharArray(filePath);
+                  CoTaskMemFree(filePath);
+                }
+
+                emit downloadStarted(uriStr, filePathStr);
+
+                const int subscriptionId = m_nextDownloadSubscriptionId++;
+                DownloadSubscription sub;
+                sub.id = subscriptionId;
+                sub.operation = download;
+                sub.uri = uriStr;
+                sub.filePath = filePathStr;
+
+                download->add_StateChanged(
+                  Callback<ICoreWebView2StateChangedEventHandler>(
+                    [this, subscriptionId](ICoreWebView2DownloadOperation* sender, IUnknown*) -> HRESULT {
+                      handleDownloadStateChanged(subscriptionId, sender);
+                      return S_OK;
+                    })
+                    .Get(),
+                  &sub.stateChangedToken);
+
+                m_downloadSubscriptions.push_back(sub);
+
+                return S_OK;
+              })
+              .Get(),
+            &m_downloadStartingToken);
+        }
+
+        updateBounds();
+        updateVisibility();
+        updateNavigationState();
+        updateAudioState();
+
+        m_initialized = true;
+        emit initializedChanged();
+
+        flushPendingScripts();
+
+        const QUrl pending = m_pendingNavigate;
+        m_pendingNavigate = {};
+        if (pending.isValid()) {
+          navigate(pending);
+        }
 
         return S_OK;
       })
@@ -601,6 +1013,15 @@ void WebView2View::setTitle(const QString& title)
   emit titleChanged();
 }
 
+void WebView2View::setFaviconUrl(const QUrl& url)
+{
+  if (m_faviconUrl == url) {
+    return;
+  }
+  m_faviconUrl = url;
+  emit faviconUrlChanged();
+}
+
 void WebView2View::setDocumentPlayingAudio(bool playing)
 {
   if (m_documentPlayingAudio == playing) {
@@ -617,4 +1038,16 @@ void WebView2View::setMutedValue(bool muted)
   }
   m_muted = muted;
   emit mutedChanged();
+}
+
+void WebView2View::setInitError(HRESULT code, const QString& message)
+{
+  const QString trimmed = message.trimmed();
+  if (m_initErrorCode == code && m_initError == trimmed) {
+    return;
+  }
+
+  m_initErrorCode = code;
+  m_initError = trimmed;
+  emit initErrorChanged();
 }

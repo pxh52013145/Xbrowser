@@ -6,9 +6,12 @@ qt_add_executable(xbrowser
   core/BrowserController.cpp
   core/CommandBus.cpp
   core/DownloadModel.cpp
+  core/ExtensionsStore.cpp
+  core/ModsModel.cpp
   core/NotificationCenter.cpp
   core/QuickLinksModel.cpp
   core/SessionStore.cpp
+  core/SitePermissionsStore.cpp
   core/SplitViewController.cpp
   core/TabFilterModel.cpp
   core/TabGroupModel.cpp
@@ -18,6 +21,7 @@ qt_add_executable(xbrowser
   core/ToastController.cpp
   core/WorkspaceModel.cpp
   engine/webview2/WebView2View.cpp
+  engine/webview2/BrowserExtensionsModel.cpp
   ../ui/ui.qrc
 )
 
@@ -54,3 +58,34 @@ target_compile_definitions(xbrowser PRIVATE
 
 include("${CMAKE_SOURCE_DIR}/cmake/WebView2Sdk.cmake")
 xbrowser_setup_webview2(xbrowser)
+
+if(WIN32)
+  option(XBROWSER_AUTO_DEPLOY_QT "Run windeployqt after building xbrowser so the exe is runnable without a Qt PATH." ON)
+
+  if(XBROWSER_AUTO_DEPLOY_QT)
+    set(_qt_bin "")
+    if(Qt6_DIR)
+      get_filename_component(_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+      set(_qt_bin "${_qt_prefix}/bin")
+    endif()
+
+    find_program(XBROWSER_WINDEPLOYQT_EXECUTABLE NAMES windeployqt.exe windeployqt HINTS "${_qt_bin}")
+
+    if(XBROWSER_WINDEPLOYQT_EXECUTABLE)
+      add_custom_command(TARGET xbrowser POST_BUILD
+        COMMAND "${XBROWSER_WINDEPLOYQT_EXECUTABLE}"
+          $<$<CONFIG:Debug>:--debug>
+          --force
+          --no-translations
+          --qmldir "${CMAKE_SOURCE_DIR}/ui/qml"
+          "$<TARGET_FILE:xbrowser>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/cmake/qt.conf"
+          "$<TARGET_FILE_DIR:xbrowser>/qt.conf"
+        VERBATIM
+      )
+    else()
+      message(WARNING "XBROWSER_AUTO_DEPLOY_QT is ON but windeployqt.exe was not found (Qt6_DIR='${Qt6_DIR}'). Use scripts/run.ps1 or disable XBROWSER_AUTO_DEPLOY_QT.")
+    endif()
+  endif()
+endif()

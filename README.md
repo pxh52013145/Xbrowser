@@ -7,6 +7,30 @@ Windows-only 的桌面浏览器项目，目标是用 **Qt 6 + QML** 重写一套
 - 设计文档：`docs/DESIGN.md`
 - UX 规格：`docs/UX_SPEC.md`
 - 构建指南：`docs/BUILDING.md`
+- 运行指南：`docs/RUNNING.md`
+
+## 快速运行（开发）
+
+推荐（构建 + 运行一条命令）：
+
+```powershell
+.\scripts\dev.ps1 -Config Debug
+```
+
+也可以直接双击：`scripts\\dev.cmd`
+
+如果你只想手动构建/运行：
+
+```powershell
+cmake --build build --config Debug
+.\build\Debug\xbrowser.exe
+```
+
+如果遇到“缺少 Qt6*.dll / 平台插件”等系统错误（或你禁用了自动部署），使用：
+
+- 双击 `scripts\\run.cmd`（等价于 `run.ps1`，带 `ExecutionPolicy Bypass`）
+- 需要“可双击运行”的独立目录：先执行 `scripts\\deploy.cmd` / `.\scripts\deploy.ps1 -Config Debug`，再双击 `build\\Debug\\xbrowser.exe`
+- Visual Studio：打开 `build\\XBrowser.sln`，把 `xbrowser` 设为启动项目运行/调试
 
 ## 目标（MVP）
 

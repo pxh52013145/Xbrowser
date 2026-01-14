@@ -35,6 +35,8 @@ public:
   Q_INVOKABLE void clearFinished();
   Q_INVOKABLE void openFile(int downloadId);
   Q_INVOKABLE void openFolder(int downloadId);
+  Q_INVOKABLE void openLatestFinishedFile();
+  Q_INVOKABLE void openLatestFinishedFolder();
 
 signals:
   void activeCountChanged();
@@ -66,4 +68,3 @@ private:
   int m_nextId = 1;
   int m_activeCount = 0;
 };
-

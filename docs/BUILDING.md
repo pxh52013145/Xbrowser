@@ -19,7 +19,15 @@ cmake --build build --config Debug
 
 Run the app (path depends on generator/config):
 
-- Visual Studio generator: `build\src\Debug\xbrowser.exe` (or `Release`)
+- Visual Studio generator: `build\Debug\xbrowser.exe` (or `Release`)
+
+By default, the build runs `windeployqt` after linking `xbrowser`, so the exe should be runnable directly (double-clickable) without setting Qt on `PATH`.
+You can disable this if you want faster builds: `-DXBROWSER_AUTO_DEPLOY_QT=OFF`.
+
+If you see missing Qt DLL errors (e.g. `Qt6QuickControls2d.dll`), you need either:
+
+- Run from a shell with Qt on `PATH` (dev workflow): `.\scripts\run.ps1 -Config Debug` (or double-click `scripts\run.cmd`)
+- Or deploy Qt runtime next to the exe (double-clickable): `.\scripts\deploy.ps1 -Config Debug` (or double-click `scripts\deploy.cmd`)
 
 ## WebView2 SDK notes
 
@@ -28,4 +36,3 @@ This repo uses the **Microsoft.Web.WebView2** NuGet package for headers/libs.
 - Default: CMake downloads the pinned version automatically at configure time.
 - Offline: extract the NuGet package and pass `-DXBROWSER_WEBVIEW2_SDK_DIR="...\\Microsoft.Web.WebView2.<version>"`.
 - To bump SDK version: set `-DXBROWSER_WEBVIEW2_PACKAGE_VERSION=...` during configure.
-

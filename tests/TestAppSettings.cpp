@@ -33,11 +33,13 @@ private slots:
     QVERIFY(doc.isObject());
     const QJsonObject obj = doc.object();
 
-    QCOMPARE(obj.value("version").toInt(), 2);
+    QCOMPARE(obj.value("version").toInt(), 3);
     QCOMPARE(obj.value("lastSeenAppVersion").toString(), QStringLiteral("1.2.3"));
     QCOMPARE(obj.value("onboardingSeen").toBool(), true);
     QCOMPARE(obj.value("showMenuBar").toBool(), true);
     QCOMPARE(obj.value("closeTabOnBackNoHistory").toBool(), true);
+    QVERIFY(obj.contains("reduceMotion"));
+    QCOMPARE(obj.value("reduceMotion").toBool(), false);
   }
 };
 

@@ -1,5 +1,26 @@
 #include "TabGroupModel.h"
 
+namespace
+{
+QColor defaultGroupColor(int id)
+{
+  static const QVector<QColor> palette = {
+    QColor("#7c3aed"), // violet
+    QColor("#2563eb"), // blue
+    QColor("#059669"), // green
+    QColor("#ea580c"), // orange
+    QColor("#db2777"), // pink
+    QColor("#0ea5e9"), // sky
+  };
+
+  if (palette.isEmpty()) {
+    return QColor();
+  }
+  const int idx = qMax(0, id - 1) % palette.size();
+  return palette[idx];
+}
+}
+
 TabGroupModel::TabGroupModel(QObject* parent)
   : QAbstractListModel(parent)
 {
@@ -32,6 +53,8 @@ QVariant TabGroupModel::data(const QModelIndex& index, int role) const
       return group.name;
     case CollapsedRole:
       return group.collapsed;
+    case ColorRole:
+      return group.color;
     default:
       return {};
   }
@@ -43,6 +66,7 @@ QHash<int, QByteArray> TabGroupModel::roleNames() const
     {GroupIdRole, "groupId"},
     {NameRole, "name"},
     {CollapsedRole, "collapsed"},
+    {ColorRole, "groupColor"},
   };
 }
 
@@ -56,7 +80,7 @@ int TabGroupModel::addGroup(const QString& name)
   return addGroupWithId(0, name, false);
 }
 
-int TabGroupModel::addGroupWithId(int groupId, const QString& name, bool collapsed)
+int TabGroupModel::addGroupWithId(int groupId, const QString& name, bool collapsed, const QColor& color)
 {
   const int index = m_groups.size();
   beginInsertRows(QModelIndex(), index, index);
@@ -66,6 +90,7 @@ int TabGroupModel::addGroupWithId(int groupId, const QString& name, bool collaps
   const QString trimmed = name.trimmed();
   entry.name = trimmed.isEmpty() ? QStringLiteral("Group") : trimmed;
   entry.collapsed = collapsed;
+  entry.color = color.isValid() ? color : defaultGroupColor(entry.id);
   m_groups.push_back(entry);
 
   if (entry.id >= m_nextId) {
@@ -168,4 +193,28 @@ void TabGroupModel::setCollapsedAt(int index, bool collapsed)
 
   entry.collapsed = collapsed;
   emit dataChanged(this->index(index), this->index(index), {CollapsedRole});
+}
+
+QColor TabGroupModel::colorAt(int index) const
+{
+  if (index < 0 || index >= m_groups.size()) {
+    return {};
+  }
+  return m_groups[index].color;
+}
+
+void TabGroupModel::setColorAt(int index, const QColor& color)
+{
+  if (index < 0 || index >= m_groups.size()) {
+    return;
+  }
+
+  const QColor next = color.isValid() ? color : defaultGroupColor(m_groups[index].id);
+  auto& entry = m_groups[index];
+  if (entry.color == next) {
+    return;
+  }
+
+  entry.color = next;
+  emit dataChanged(this->index(index), this->index(index), {ColorRole});
 }

@@ -6,8 +6,10 @@ function(xbrowser_add_test target_name)
     ../src/core/AppSettings.cpp
     ../src/core/BrowserController.cpp
     ../src/core/CommandBus.cpp
+    ../src/core/ExtensionsStore.cpp
     ../src/core/NotificationCenter.cpp
     ../src/core/SessionStore.cpp
+    ../src/core/SitePermissionsStore.cpp
     ../src/core/SplitViewController.cpp
     ../src/core/TabModel.cpp
     ../src/core/TabGroupModel.cpp
@@ -80,4 +82,20 @@ xbrowser_add_test(xbrowser_test_theme
 xbrowser_add_test(xbrowser_test_downloads
   TestDownloadModel.cpp
   ../src/core/DownloadModel.cpp
+)
+
+xbrowser_add_test(xbrowser_test_workspaces
+  TestWorkspaceModel.cpp
+)
+
+xbrowser_add_test(xbrowser_test_splitview
+  TestSplitViewController.cpp
+)
+
+xbrowser_add_test(xbrowser_test_permissions
+  TestSitePermissionsStore.cpp
+)
+
+xbrowser_add_test(xbrowser_test_extensions_store
+  TestExtensionsStore.cpp
 )

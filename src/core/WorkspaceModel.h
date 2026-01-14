@@ -18,6 +18,8 @@ public:
     NameRole,
     AccentColorRole,
     IsActiveRole,
+    SidebarWidthRole,
+    SidebarExpandedRole,
   };
   Q_ENUM(Role)
 
@@ -33,6 +35,7 @@ public:
   Q_INVOKABLE int count() const;
   Q_INVOKABLE int addWorkspace(const QString& name);
   Q_INVOKABLE int addWorkspaceWithId(int workspaceId, const QString& name, const QColor& accentColor = {});
+  Q_INVOKABLE bool moveWorkspace(int fromIndex, int toIndex);
   Q_INVOKABLE void closeWorkspace(int index);
   Q_INVOKABLE void clear();
 
@@ -42,6 +45,12 @@ public:
 
   Q_INVOKABLE QColor accentColorAt(int index) const;
   Q_INVOKABLE void setAccentColorAt(int index, const QColor& color);
+
+  Q_INVOKABLE int sidebarWidthAt(int index) const;
+  Q_INVOKABLE void setSidebarWidthAt(int index, int width);
+
+  Q_INVOKABLE bool sidebarExpandedAt(int index) const;
+  Q_INVOKABLE void setSidebarExpandedAt(int index, bool expanded);
 
   int activeWorkspaceId() const;
   QColor activeAccentColor() const;
@@ -57,6 +66,8 @@ private:
     int id = 0;
     QString name;
     QColor accentColor;
+    int sidebarWidth = 260;
+    bool sidebarExpanded = true;
     TabModel* tabs = nullptr;
     TabGroupModel* groups = nullptr;
   };

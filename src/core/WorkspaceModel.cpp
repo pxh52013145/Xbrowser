@@ -60,6 +60,10 @@ QVariant WorkspaceModel::data(const QModelIndex& index, int role) const
       return ws.accentColor;
     case IsActiveRole:
       return row == m_activeIndex;
+    case SidebarWidthRole:
+      return ws.sidebarWidth;
+    case SidebarExpandedRole:
+      return ws.sidebarExpanded;
     default:
       return {};
   }
@@ -72,6 +76,8 @@ QHash<int, QByteArray> WorkspaceModel::roleNames() const
     {NameRole, "name"},
     {AccentColorRole, "accentColor"},
     {IsActiveRole, "isActive"},
+    {SidebarWidthRole, "sidebarWidth"},
+    {SidebarExpandedRole, "sidebarExpanded"},
   };
 }
 
@@ -136,6 +142,40 @@ int WorkspaceModel::addWorkspaceWithId(int workspaceId, const QString& name, con
   }
 
   return index;
+}
+
+bool WorkspaceModel::moveWorkspace(int fromIndex, int toIndex)
+{
+  const int size = m_workspaces.size();
+  if (fromIndex < 0 || fromIndex >= size) {
+    return false;
+  }
+  if (toIndex < 0 || toIndex >= size) {
+    return false;
+  }
+  if (fromIndex == toIndex) {
+    return false;
+  }
+
+  const int activeWorkspaceId = this->activeWorkspaceId();
+
+  const int destinationRow = (toIndex > fromIndex) ? (toIndex + 1) : toIndex;
+  beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destinationRow);
+  m_workspaces.move(fromIndex, toIndex);
+  endMoveRows();
+
+  int nextActiveIndex = -1;
+  if (activeWorkspaceId > 0) {
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+      if (m_workspaces[i].id == activeWorkspaceId) {
+        nextActiveIndex = i;
+        break;
+      }
+    }
+  }
+  setActiveIndex(nextActiveIndex);
+
+  return true;
 }
 
 void WorkspaceModel::closeWorkspace(int index)
@@ -239,6 +279,53 @@ void WorkspaceModel::setAccentColorAt(int index, const QColor& color)
 
   ws.accentColor = next;
   emit dataChanged(this->index(index), this->index(index), {AccentColorRole});
+}
+
+int WorkspaceModel::sidebarWidthAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return 0;
+  }
+  return m_workspaces[index].sidebarWidth;
+}
+
+void WorkspaceModel::setSidebarWidthAt(int index, int width)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  const int next = qBound(160, width, 520);
+  auto& ws = m_workspaces[index];
+  if (ws.sidebarWidth == next) {
+    return;
+  }
+
+  ws.sidebarWidth = next;
+  emit dataChanged(this->index(index), this->index(index), {SidebarWidthRole});
+}
+
+bool WorkspaceModel::sidebarExpandedAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return false;
+  }
+  return m_workspaces[index].sidebarExpanded;
+}
+
+void WorkspaceModel::setSidebarExpandedAt(int index, bool expanded)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  auto& ws = m_workspaces[index];
+  if (ws.sidebarExpanded == expanded) {
+    return;
+  }
+
+  ws.sidebarExpanded = expanded;
+  emit dataChanged(this->index(index), this->index(index), {SidebarExpandedRole});
 }
 
 int WorkspaceModel::activeWorkspaceId() const

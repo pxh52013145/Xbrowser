@@ -84,6 +84,60 @@ void TabFilterModel::setSearchText(const QString& text)
   invalidateFilter();
 }
 
+int TabFilterModel::tabIdAt(int index) const
+{
+  if (index < 0 || index >= rowCount()) {
+    return 0;
+  }
+
+  const QModelIndex idx = this->index(index, 0);
+  if (!idx.isValid()) {
+    return 0;
+  }
+
+  return idx.data(TabModel::TabIdRole).toInt();
+}
+
+QVariantList TabFilterModel::tabIds() const
+{
+  QVariantList ids;
+  const int count = rowCount();
+  ids.reserve(count);
+
+  for (int i = 0; i < count; ++i) {
+    const int tabId = tabIdAt(i);
+    if (tabId > 0) {
+      ids.push_back(tabId);
+    }
+  }
+
+  return ids;
+}
+
+QVariantList TabFilterModel::tabIdsInRange(int fromIndex, int toIndex) const
+{
+  const int count = rowCount();
+  if (count <= 0) {
+    return {};
+  }
+
+  const int a = qBound(0, fromIndex, count - 1);
+  const int b = qBound(0, toIndex, count - 1);
+  const int start = qMin(a, b);
+  const int end = qMax(a, b);
+
+  QVariantList ids;
+  ids.reserve(end - start + 1);
+  for (int i = start; i <= end; ++i) {
+    const int tabId = tabIdAt(i);
+    if (tabId > 0) {
+      ids.push_back(tabId);
+    }
+  }
+
+  return ids;
+}
+
 bool TabFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
 {
   const QModelIndex idx = sourceModel()->index(sourceRow, 0, sourceParent);

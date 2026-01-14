@@ -160,6 +160,41 @@ void DownloadModel::openFolder(int downloadId)
   QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
 }
 
+void DownloadModel::openLatestFinishedFile()
+{
+  for (int i = m_entries.size() - 1; i >= 0; --i) {
+    const Entry& entry = m_entries[i];
+    if (entry.state != State::Completed) {
+      continue;
+    }
+    if (entry.filePath.isEmpty()) {
+      continue;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(entry.filePath));
+    return;
+  }
+}
+
+void DownloadModel::openLatestFinishedFolder()
+{
+  for (int i = m_entries.size() - 1; i >= 0; --i) {
+    const Entry& entry = m_entries[i];
+    if (entry.state != State::Completed) {
+      continue;
+    }
+    if (entry.filePath.isEmpty()) {
+      continue;
+    }
+
+    const QString folder = QFileInfo(entry.filePath).absolutePath();
+    if (folder.isEmpty()) {
+      continue;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    return;
+  }
+}
+
 int DownloadModel::findIndexById(int downloadId) const
 {
   for (int i = 0; i < m_entries.size(); ++i) {
@@ -216,4 +251,3 @@ void DownloadModel::updateActiveCount()
   m_activeCount = next;
   emit activeCountChanged();
 }
-

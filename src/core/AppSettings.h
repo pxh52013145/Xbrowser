@@ -13,6 +13,7 @@ class AppSettings : public QObject
   Q_PROPERTY(
     bool essentialCloseResets READ essentialCloseResets WRITE setEssentialCloseResets NOTIFY essentialCloseResetsChanged)
   Q_PROPERTY(bool compactMode READ compactMode WRITE setCompactMode NOTIFY compactModeChanged)
+  Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
   Q_PROPERTY(
     QString lastSeenAppVersion READ lastSeenAppVersion WRITE setLastSeenAppVersion NOTIFY lastSeenAppVersionChanged)
   Q_PROPERTY(QString themeId READ themeId WRITE setThemeId NOTIFY themeIdChanged)
@@ -40,6 +41,9 @@ public:
   bool compactMode() const;
   void setCompactMode(bool enabled);
 
+  bool reduceMotion() const;
+  void setReduceMotion(bool enabled);
+
   QString lastSeenAppVersion() const;
   void setLastSeenAppVersion(const QString& version);
 
@@ -61,6 +65,7 @@ signals:
   void addressBarVisibleChanged();
   void essentialCloseResetsChanged();
   void compactModeChanged();
+  void reduceMotionChanged();
   void lastSeenAppVersionChanged();
   void themeIdChanged();
   void onboardingSeenChanged();
@@ -77,6 +82,7 @@ private:
   bool m_addressBarVisible = true;
   bool m_essentialCloseResets = false;
   bool m_compactMode = false;
+  bool m_reduceMotion = false;
   QString m_lastSeenAppVersion;
   QString m_themeId = QStringLiteral("workspace");
   bool m_onboardingSeen = false;

@@ -18,6 +18,9 @@ class ThemeController : public QObject
   Q_PROPERTY(QColor backgroundTo READ backgroundTo NOTIFY themeChanged)
   Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY themeChanged)
   Q_PROPERTY(int spacing READ spacing NOTIFY themeChanged)
+  Q_PROPERTY(int motionFastMs READ motionFastMs CONSTANT)
+  Q_PROPERTY(int motionNormalMs READ motionNormalMs CONSTANT)
+  Q_PROPERTY(int motionSlowMs READ motionSlowMs CONSTANT)
 
 public:
   explicit ThemeController(QObject* parent = nullptr);
@@ -31,6 +34,9 @@ public:
   QColor backgroundTo() const;
   int cornerRadius() const;
   int spacing() const;
+  int motionFastMs() const;
+  int motionNormalMs() const;
+  int motionSlowMs() const;
 
 signals:
   void themeChanged();

@@ -104,6 +104,21 @@ void AppSettings::setCompactMode(bool enabled)
   scheduleSave();
 }
 
+bool AppSettings::reduceMotion() const
+{
+  return m_reduceMotion;
+}
+
+void AppSettings::setReduceMotion(bool enabled)
+{
+  if (m_reduceMotion == enabled) {
+    return;
+  }
+  m_reduceMotion = enabled;
+  emit reduceMotionChanged();
+  scheduleSave();
+}
+
 QString AppSettings::lastSeenAppVersion() const
 {
   return m_lastSeenAppVersion;
@@ -198,7 +213,7 @@ void AppSettings::load()
   const QJsonObject obj = doc.object();
 
   const int version = obj.value("version").toInt(1);
-  const bool needsUpgrade = version < 2;
+  const bool needsUpgrade = version < 3;
 
   const int width = obj.value("sidebarWidth").toInt(m_sidebarWidth);
   m_sidebarWidth = qBound(160, width, 520);
@@ -206,6 +221,7 @@ void AppSettings::load()
   m_addressBarVisible = obj.value("addressBarVisible").toBool(m_addressBarVisible);
   m_essentialCloseResets = obj.value("essentialCloseResets").toBool(m_essentialCloseResets);
   m_compactMode = obj.value("compactMode").toBool(m_compactMode);
+  m_reduceMotion = obj.value("reduceMotion").toBool(m_reduceMotion);
   m_lastSeenAppVersion = obj.value("lastSeenAppVersion").toString(m_lastSeenAppVersion).trimmed();
   m_themeId = obj.value("themeId").toString(m_themeId).trimmed();
   if (m_themeId.isEmpty()) {
@@ -236,12 +252,13 @@ bool AppSettings::saveNow(QString* error) const
   }
 
   QJsonObject obj;
-  obj.insert("version", 2);
+  obj.insert("version", 3);
   obj.insert("sidebarWidth", m_sidebarWidth);
   obj.insert("sidebarExpanded", m_sidebarExpanded);
   obj.insert("addressBarVisible", m_addressBarVisible);
   obj.insert("essentialCloseResets", m_essentialCloseResets);
   obj.insert("compactMode", m_compactMode);
+  obj.insert("reduceMotion", m_reduceMotion);
   obj.insert("lastSeenAppVersion", m_lastSeenAppVersion);
   obj.insert("themeId", m_themeId);
   obj.insert("onboardingSeen", m_onboardingSeen);

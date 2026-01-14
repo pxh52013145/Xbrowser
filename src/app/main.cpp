@@ -20,20 +20,23 @@
 #include "../core/BrowserController.h"
 #include "../core/CommandBus.h"
 #include "../core/DownloadModel.h"
+#include "../core/ModsModel.h"
 #include "../core/NotificationCenter.h"
 #include "../core/QuickLinksModel.h"
 #include "../core/SessionStore.h"
+#include "../core/SitePermissionsStore.h"
 #include "../core/SplitViewController.h"
 #include "../core/TabFilterModel.h"
 #include "../core/ThemeController.h"
 #include "../core/ThemePackModel.h"
 #include "../core/ToastController.h"
+#include "../engine/webview2/BrowserExtensionsModel.h"
 #include "../engine/webview2/WebView2View.h"
 #include "../platform/windows/WindowChromeController.h"
 
 namespace
 {
-QString detectQtInstallPrefix()
+QString detectQtRuntimeRoot()
 {
   const wchar_t* candidates[] = { L"Qt6Core.dll", L"Qt6Cored.dll" };
   HMODULE module = nullptr;
@@ -55,43 +58,75 @@ QString detectQtInstallPrefix()
 
   const QString dllPath = QString::fromWCharArray(buffer, static_cast<int>(len));
   const QFileInfo info(dllPath);
-  QDir binDir(info.absolutePath());
-  if (!binDir.exists()) {
+  const QString dllDir = info.absolutePath();
+  QDir dir(dllDir);
+  if (!dir.exists()) {
     return {};
   }
-  if (!binDir.cdUp()) {
+
+  const auto hasQtRuntimeLayout = [](const QDir& candidate) {
+    return candidate.exists(QStringLiteral("plugins")) || candidate.exists(QStringLiteral("qml"))
+           || candidate.exists(QStringLiteral("platforms"));
+  };
+
+  if (hasQtRuntimeLayout(dir)) {
+    return dir.absolutePath();
+  }
+
+  QDir parent = dir;
+  if (parent.cdUp() && hasQtRuntimeLayout(parent)) {
+    return parent.absolutePath();
+  }
+
+  return {};
+}
+
+QString resolveQtSubdir(const QString& runtimeRoot, const QString& subdir)
+{
+  if (runtimeRoot.isEmpty()) {
     return {};
   }
-  return binDir.absolutePath();
+  const QString candidate = QDir(runtimeRoot).filePath(subdir);
+  return QDir(candidate).exists() ? candidate : QString();
 }
 
 void ensureQtRuntimePaths()
 {
-  const QString prefix = detectQtInstallPrefix();
-  if (prefix.isEmpty()) {
+  const QString runtimeRoot = detectQtRuntimeRoot();
+  if (runtimeRoot.isEmpty()) {
     return;
   }
 
-  const QString pluginsPath = QDir(prefix).filePath("plugins");
-  const QString qmlPath = QDir(prefix).filePath("qml");
-  const QString platformsPath = QDir(pluginsPath).filePath("platforms");
+  const QString pluginsPath = resolveQtSubdir(runtimeRoot, QStringLiteral("plugins"));
+  const QString deployedPluginsPath = resolveQtSubdir(runtimeRoot, QStringLiteral("platforms"));
+  const QString qmlPath = resolveQtSubdir(runtimeRoot, QStringLiteral("qml"));
 
-  const auto setIfEmpty = [](const char* key, const QString& value) {
-    if (value.isEmpty() || !qEnvironmentVariableIsEmpty(key)) {
+  QString pluginBasePath;
+  if (!pluginsPath.isEmpty()) {
+    pluginBasePath = pluginsPath;
+  } else if (!deployedPluginsPath.isEmpty()) {
+    pluginBasePath = runtimeRoot;
+  }
+
+  QString platformsPath;
+  if (!pluginBasePath.isEmpty()) {
+    platformsPath = resolveQtSubdir(pluginBasePath, QStringLiteral("platforms"));
+  }
+  if (platformsPath.isEmpty()) {
+    platformsPath = resolveQtSubdir(runtimeRoot, QStringLiteral("platforms"));
+  }
+
+  const auto setEnv = [](const char* key, const QString& value) {
+    if (value.isEmpty()) {
       return;
     }
     qputenv(key, QDir::toNativeSeparators(value).toUtf8());
   };
 
-  if (QDir(pluginsPath).exists()) {
-    setIfEmpty("QT_PLUGIN_PATH", pluginsPath);
-  }
-  if (QDir(qmlPath).exists()) {
-    setIfEmpty("QML2_IMPORT_PATH", qmlPath);
-  }
-  if (QDir(platformsPath).exists()) {
-    setIfEmpty("QT_QPA_PLATFORM_PLUGIN_PATH", platformsPath);
-  }
+  // Always override to avoid leaking global Qt env vars from other projects.
+  setEnv("QT_PLUGIN_PATH", pluginBasePath);
+  setEnv("QML2_IMPORT_PATH", qmlPath);
+  setEnv("QT_QPA_PLATFORM_PLUGIN_PATH", platformsPath);
 }
 
 void showFatalMessage(const QString& message, const QString& title = QStringLiteral("XBrowser"))
@@ -105,6 +140,8 @@ void showFatalMessage(const QString& message, const QString& title = QStringLite
 
 QFile* g_logFile = nullptr;
 QMutex g_logMutex;
+
+QString logFilePath();
 
 QString logLevel(QtMsgType type)
 {
@@ -127,22 +164,50 @@ QString logLevel(QtMsgType type)
 void messageHandler(QtMsgType type, const QMessageLogContext&, const QString& msg)
 {
   QMutexLocker locker(&g_logMutex);
-  if (!g_logFile || !g_logFile->isOpen()) {
-    return;
+  if (g_logFile && g_logFile->isOpen()) {
+    QTextStream out(g_logFile);
+    out << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " [" << logLevel(type) << "] " << msg << "\n";
+    g_logFile->flush();
   }
 
-  QTextStream out(g_logFile);
-  out << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " [" << logLevel(type) << "] " << msg << "\n";
-  g_logFile->flush();
-
   if (type == QtFatalMsg) {
-    abort();
+    QString details = msg;
+    const QString lower = msg.toLower();
+    if (lower.contains(QStringLiteral("platform plugin")) || lower.contains(QStringLiteral("qt platform"))) {
+      details += QStringLiteral(
+        "\n\nHint:\n"
+        "- Run scripts\\run.cmd (auto-fixes Qt runtime)\n"
+        "- Or run scripts\\deploy.cmd then start build\\Debug\\xbrowser.exe\n");
+    }
+
+    details += QStringLiteral("\n\nLog: %1").arg(logFilePath());
+
+    showFatalMessage(details, QStringLiteral("XBrowser (Fatal Error)"));
+
+    if (IsDebuggerPresent()) {
+      abort();
+    }
+    ExitProcess(1);
   }
 }
 
 QString logFilePath()
 {
-  return QDir(xbrowser::appDataRoot()).filePath("xbrowser.log");
+  const QString overrideDir = qEnvironmentVariable("XBROWSER_DATA_DIR");
+  QString baseDir;
+  if (!overrideDir.isEmpty()) {
+    baseDir = overrideDir;
+  } else {
+    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+    if (!localAppData.isEmpty()) {
+      baseDir = QDir(localAppData).filePath(QStringLiteral("XBrowser/XBrowser"));
+    } else {
+      baseDir = QDir(QDir::tempPath()).filePath(QStringLiteral("XBrowser"));
+    }
+  }
+
+  QDir().mkpath(baseDir);
+  return QDir(baseDir).filePath(QStringLiteral("xbrowser.log"));
 }
 
 void installLogging()
@@ -159,15 +224,16 @@ void installLogging()
 
 int main(int argc, char* argv[])
 {
-  ensureQtRuntimePaths();
-  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-
-  QGuiApplication app(argc, argv);
   QCoreApplication::setOrganizationName("XBrowser");
   QCoreApplication::setApplicationName("XBrowser");
   QCoreApplication::setApplicationVersion(QStringLiteral(XBROWSER_VERSION));
 
+  ensureQtRuntimePaths();
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
   installLogging();
+
+  QGuiApplication app(argc, argv);
 
   QQuickStyle::setStyle("Material");
 
@@ -193,6 +259,7 @@ int main(int argc, char* argv[])
   NotificationCenter notifications;
   ToastController toast;
   DownloadModel downloads;
+  ModsModel mods;
   ThemeController theme;
   theme.setWorkspaces(browser.workspaces());
   theme.setSettings(browser.settings());
@@ -202,6 +269,8 @@ int main(int argc, char* argv[])
   quickLinks.setWorkspaces(browser.workspaces());
   SplitViewController splitView;
   splitView.setBrowser(&browser);
+  BrowserExtensionsModel extensions;
+  SitePermissionsStore& sitePermissions = SitePermissionsStore::instance();
   SessionStore session;
   session.attach(&browser, &splitView);
 
@@ -241,6 +310,44 @@ int main(int argc, char* argv[])
       return;
     }
 
+    if (id == "restore-closed-tab") {
+      if (!browser.restoreLastClosedTab()) {
+        toast.showToast(QStringLiteral("No recently closed tab"));
+      }
+      return;
+    }
+
+    if (id == "duplicate-tab") {
+      const int tabId = args.value("tabId").toInt();
+      if (tabId <= 0) {
+        return;
+      }
+      browser.duplicateTabById(tabId);
+      return;
+    }
+
+    if (id == "next-tab" || id == "prev-tab") {
+      TabModel* model = browser.tabs();
+      if (!model) {
+        return;
+      }
+
+      const int count = model->count();
+      if (count <= 0) {
+        return;
+      }
+
+      int index = model->activeIndex();
+      if (index < 0) {
+        index = 0;
+      }
+
+      const int delta = (id == "next-tab") ? 1 : -1;
+      const int next = (index + delta + count) % count;
+      model->setActiveIndex(next);
+      return;
+    }
+
     if (id == "toggle-sidebar") {
       AppSettings* settings = browser.settings();
       settings->setSidebarExpanded(!settings->sidebarExpanded());
@@ -256,6 +363,12 @@ int main(int argc, char* argv[])
     if (id == "toggle-compact-mode") {
       AppSettings* settings = browser.settings();
       settings->setCompactMode(!settings->compactMode());
+      return;
+    }
+
+    if (id == "toggle-reduce-motion") {
+      AppSettings* settings = browser.settings();
+      settings->setReduceMotion(!settings->reduceMotion());
       return;
     }
 
@@ -296,11 +409,23 @@ int main(int argc, char* argv[])
 
     if (id == "copy-url") {
       TabModel* model = browser.tabs();
-      if (!model || model->activeIndex() < 0) {
+      if (!model) {
         return;
       }
 
-      const QUrl url = model->urlAt(model->activeIndex());
+      int index = model->activeIndex();
+      const int tabId = args.value("tabId").toInt();
+      if (tabId > 0) {
+        const int resolved = model->indexOfTabId(tabId);
+        if (resolved >= 0) {
+          index = resolved;
+        }
+      }
+      if (index < 0) {
+        return;
+      }
+
+      const QUrl url = model->urlAt(index);
       if (!url.isValid()) {
         return;
       }
@@ -310,13 +435,65 @@ int main(int argc, char* argv[])
       return;
     }
 
-    if (id == "share-url") {
+    if (id == "copy-title") {
       TabModel* model = browser.tabs();
-      if (!model || model->activeIndex() < 0) {
+      if (!model) {
         return;
       }
 
-      const QUrl url = model->urlAt(model->activeIndex());
+      int index = model->activeIndex();
+      const int tabId = args.value("tabId").toInt();
+      if (tabId > 0) {
+        const int resolved = model->indexOfTabId(tabId);
+        if (resolved >= 0) {
+          index = resolved;
+        }
+      }
+      if (index < 0) {
+        return;
+      }
+
+      const QString title = model->titleAt(index).trimmed();
+      if (title.isEmpty()) {
+        return;
+      }
+
+      QGuiApplication::clipboard()->setText(title);
+      toast.showToast(QStringLiteral("Copied title"));
+      return;
+    }
+
+    if (id == "copy-text") {
+      const QString text = args.value("text").toString();
+      const QString trimmed = text.trimmed();
+      if (trimmed.isEmpty()) {
+        return;
+      }
+
+      QGuiApplication::clipboard()->setText(trimmed);
+      toast.showToast(QStringLiteral("Copied"));
+      return;
+    }
+
+    if (id == "share-url") {
+      TabModel* model = browser.tabs();
+      if (!model) {
+        return;
+      }
+
+      int index = model->activeIndex();
+      const int tabId = args.value("tabId").toInt();
+      if (tabId > 0) {
+        const int resolved = model->indexOfTabId(tabId);
+        if (resolved >= 0) {
+          index = resolved;
+        }
+      }
+      if (index < 0) {
+        return;
+      }
+
+      const QUrl url = model->urlAt(index);
       if (!url.isValid()) {
         return;
       }
@@ -373,10 +550,13 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("notifications", &notifications);
   engine.rootContext()->setContextProperty("toast", &toast);
   engine.rootContext()->setContextProperty("downloads", &downloads);
+  engine.rootContext()->setContextProperty("mods", &mods);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("themes", &themes);
   engine.rootContext()->setContextProperty("quickLinks", &quickLinks);
   engine.rootContext()->setContextProperty("splitView", &splitView);
+  engine.rootContext()->setContextProperty("extensions", &extensions);
+  engine.rootContext()->setContextProperty("sitePermissions", &sitePermissions);
   engine.load(QUrl("qrc:/ui/qml/Main.qml"));
   if (engine.rootObjects().isEmpty()) {
     QString message = QStringLiteral("Failed to load UI (qrc:/ui/qml/Main.qml).");

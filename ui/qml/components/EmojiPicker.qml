@@ -2,11 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-Popup {
+Rectangle {
     id: root
-    modal: false
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     signal emojiSelected(string emoji)
 
@@ -31,14 +28,12 @@ Popup {
         return allEmojis
     }
 
-    background: Rectangle {
-        color: Qt.rgba(1, 1, 1, 0.98)
-        radius: theme.cornerRadius
-        border.color: Qt.rgba(0, 0, 0, 0.08)
-        border.width: 1
-    }
+    color: Qt.rgba(1, 1, 1, 0.98)
+    radius: theme.cornerRadius
+    border.color: Qt.rgba(0, 0, 0, 0.08)
+    border.width: 1
 
-    contentItem: ColumnLayout {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: theme.spacing
         spacing: theme.spacing

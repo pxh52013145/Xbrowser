@@ -55,6 +55,9 @@ void SessionStore::attach(BrowserController* browser, SplitViewController* split
     connect(m_splitView, &SplitViewController::enabledChanged, this, &SessionStore::scheduleSave);
     connect(m_splitView, &SplitViewController::tabsChanged, this, &SessionStore::scheduleSave);
     connect(m_splitView, &SplitViewController::focusedPaneChanged, this, &SessionStore::scheduleSave);
+    connect(m_splitView, &SplitViewController::splitRatioChanged, this, &SessionStore::scheduleSave);
+    connect(m_splitView, &SplitViewController::gridSplitRatioXChanged, this, &SessionStore::scheduleSave);
+    connect(m_splitView, &SplitViewController::gridSplitRatioYChanged, this, &SessionStore::scheduleSave);
   }
 }
 
@@ -78,6 +81,7 @@ void SessionStore::connectWorkspaceModels()
       scheduleSave();
     });
     connect(workspaces, &QAbstractItemModel::rowsRemoved, this, &SessionStore::scheduleSave);
+    connect(workspaces, &QAbstractItemModel::rowsMoved, this, &SessionStore::scheduleSave);
     connect(workspaces, &QAbstractItemModel::modelReset, this, [this] {
       connectWorkspaceModels();
       scheduleSave();
@@ -164,6 +168,12 @@ bool SessionStore::restoreNow(QString* error)
 
     const int wsIndex = workspaces->addWorkspaceWithId(wsId, name, accent);
 
+    const int sidebarWidth = wsObj.value("sidebarWidth").toInt(0);
+    if (sidebarWidth > 0) {
+      workspaces->setSidebarWidthAt(wsIndex, sidebarWidth);
+    }
+    workspaces->setSidebarExpandedAt(wsIndex, wsObj.value("sidebarExpanded").toBool(true));
+
     TabGroupModel* groups = workspaces->groupsForIndex(wsIndex);
     if (groups) {
       groups->clear();
@@ -173,7 +183,8 @@ bool SessionStore::restoreNow(QString* error)
         const int groupId = gObj.value("id").toInt();
         const QString groupName = gObj.value("name").toString();
         const bool collapsed = gObj.value("collapsed").toBool(false);
-        groups->addGroupWithId(groupId, groupName, collapsed);
+        const QColor color = parseColor(gObj.value("color"));
+        groups->addGroupWithId(groupId, groupName, collapsed, color);
       }
     }
 
@@ -233,11 +244,29 @@ bool SessionStore::restoreNow(QString* error)
     const int primaryTabId = splitObj.value("primaryTabId").toInt(0);
     const int secondaryTabId = splitObj.value("secondaryTabId").toInt(0);
     const int focusedPane = splitObj.value("focusedPane").toInt(0);
+    const double splitRatio = splitObj.value("splitRatio").toDouble(0.5);
+    const double gridSplitRatioX = splitObj.value("gridSplitRatioX").toDouble(0.5);
+    const double gridSplitRatioY = splitObj.value("gridSplitRatioY").toDouble(0.5);
+    const int paneCount = splitObj.value("paneCount").toInt(2);
+    const QJsonArray paneIds = splitObj.value("paneTabIds").toArray();
 
-    m_splitView->setPrimaryTabId(primaryTabId);
-    m_splitView->setSecondaryTabId(secondaryTabId);
-    m_splitView->setFocusedPane(focusedPane);
+    if (!paneIds.isEmpty()) {
+      const int restoredCount = qBound(2, qMax(paneCount, paneIds.size()), 4);
+      m_splitView->setPaneCount(restoredCount);
+      for (int i = 0; i < restoredCount && i < paneIds.size(); ++i) {
+        m_splitView->setTabIdForPane(i, paneIds.at(i).toInt(0));
+      }
+    } else {
+      m_splitView->setPaneCount(qBound(2, paneCount, 4));
+      m_splitView->setPrimaryTabId(primaryTabId);
+      m_splitView->setSecondaryTabId(secondaryTabId);
+    }
+
+    m_splitView->setSplitRatio(splitRatio);
+    m_splitView->setGridSplitRatioX(gridSplitRatioX);
+    m_splitView->setGridSplitRatioY(gridSplitRatioY);
     m_splitView->setEnabled(enabled);
+    m_splitView->setFocusedPane(focusedPane);
   }
 
   m_restoring = false;
@@ -266,6 +295,8 @@ bool SessionStore::saveNow(QString* error) const
     wsObj.insert("name", workspaces->nameAt(i));
     const QColor accent = workspaces->accentColorAt(i);
     wsObj.insert("accentColor", accent.isValid() ? accent.name(QColor::HexRgb) : QString());
+    wsObj.insert("sidebarWidth", workspaces->sidebarWidthAt(i));
+    wsObj.insert("sidebarExpanded", workspaces->sidebarExpandedAt(i));
 
     TabGroupModel* groups = workspaces->groupsForIndex(i);
     QJsonArray groupsArr;
@@ -275,6 +306,8 @@ bool SessionStore::saveNow(QString* error) const
         gObj.insert("id", groups->groupIdAt(g));
         gObj.insert("name", groups->nameAt(g));
         gObj.insert("collapsed", groups->collapsedAt(g));
+        const QColor color = groups->colorAt(g);
+        gObj.insert("color", color.isValid() ? color.name(QColor::HexRgb) : QString());
         groupsArr.push_back(gObj);
       }
     }
@@ -316,7 +349,19 @@ bool SessionStore::saveNow(QString* error) const
     splitObj.insert("enabled", m_splitView->enabled());
     splitObj.insert("primaryTabId", m_splitView->primaryTabId());
     splitObj.insert("secondaryTabId", m_splitView->secondaryTabId());
+    splitObj.insert("paneCount", m_splitView->paneCount());
+
+    QJsonArray paneIds;
+    const int paneCount = m_splitView->paneCount();
+    for (int i = 0; i < paneCount; ++i) {
+      paneIds.push_back(m_splitView->tabIdForPane(i));
+    }
+    splitObj.insert("paneTabIds", paneIds);
+
     splitObj.insert("focusedPane", m_splitView->focusedPane());
+    splitObj.insert("splitRatio", m_splitView->splitRatio());
+    splitObj.insert("gridSplitRatioX", m_splitView->gridSplitRatioX());
+    splitObj.insert("gridSplitRatioY", m_splitView->gridSplitRatioY());
     root.insert("splitView", splitObj);
   }
 

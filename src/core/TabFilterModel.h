@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSortFilterProxyModel>
+#include <QVariant>
 
 class TabModel;
 
@@ -31,6 +32,10 @@ public:
 
   QString searchText() const;
   void setSearchText(const QString& text);
+
+  Q_INVOKABLE int tabIdAt(int index) const;
+  Q_INVOKABLE QVariantList tabIds() const;
+  Q_INVOKABLE QVariantList tabIdsInRange(int fromIndex, int toIndex) const;
 
 signals:
   void sourceTabsChanged();

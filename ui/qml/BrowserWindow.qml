@@ -19,19 +19,156 @@ ApplicationWindow {
     property bool topBarHovered: false
     property bool sidebarHovered: false
 
+    Timer {
+        id: compactTopEnterTimer
+        interval: 140
+        repeat: false
+        onTriggered: root.compactTopHover = true
+    }
+
+    Timer {
+        id: compactTopExitTimer
+        interval: 220
+        repeat: false
+        onTriggered: root.compactTopHover = false
+    }
+
+    Timer {
+        id: compactSidebarEnterTimer
+        interval: 140
+        repeat: false
+        onTriggered: root.compactSidebarHover = true
+    }
+
+    Timer {
+        id: compactSidebarExitTimer
+        interval: 220
+        repeat: false
+        onTriggered: root.compactSidebarHover = false
+    }
+
     readonly property int windowControlButtonWidth: 46
     readonly property int windowControlButtonHeight: 32
 
     readonly property bool showTopBar: browser.settings.addressBarVisible
                                         && (!browser.settings.compactMode || topBarHovered || compactTopHover
-                                            || addressField.activeFocus || omniboxPopup.opened)
+                                            || addressField.activeFocus || (root.popupManagerContext === "omnibox"))
     readonly property bool showSidebar: browser.settings.sidebarExpanded
                                         && (!browser.settings.compactMode || sidebarHovered || compactSidebarHover)
+
+    readonly property bool sidebarIconOnly: browser.settings.sidebarExpanded && browser.settings.sidebarWidth <= 200
 
     readonly property int uiRadius: theme.cornerRadius
     readonly property int uiSpacing: theme.spacing
 
-    readonly property var mediaView: (splitView.enabled && webSecondary.documentPlayingAudio) ? webSecondary : web
+    property string glanceScript: ""
+    readonly property string modsBootstrapScript: `
+(() => {
+  if (window.__xbrowserModsInstalled) return;
+  window.__xbrowserModsInstalled = true;
+
+  const styleId = "__xbrowserModsStyle";
+  function ensureStyle() {
+    let el = document.getElementById(styleId);
+    if (el) return el;
+    el = document.createElement("style");
+    el.id = styleId;
+    (document.head || document.documentElement).appendChild(el);
+    return el;
+  }
+
+  const styleEl = ensureStyle();
+  function apply(css) {
+    styleEl.textContent = css || "";
+  }
+
+  try {
+    const wv = window.chrome && window.chrome.webview;
+    if (wv && wv.addEventListener) {
+      wv.addEventListener("message", (ev) => {
+        const data = ev && ev.data;
+        if (!data || data.type !== "xbrowser-mods-css") return;
+        apply(String(data.css || ""));
+      });
+      wv.postMessage({ type: "xbrowser-mods-ready" });
+    }
+  } catch (_) {}
+})();
+`
+    property string omniboxQuery: ""
+    property bool suppressNextOmniboxUpdate: false
+
+    property int webContextMenuTabId: 0
+    property var webContextMenuInfo: ({})
+    property var webContextMenuItems: []
+
+    property string popupManagerContext: ""
+    property string overlayHostContext: ""
+
+    property string extensionsPanelSearch: ""
+    property string extensionPopupExtensionId: ""
+    property string extensionPopupName: ""
+    property string extensionPopupUrl: ""
+    property string extensionPopupOptionsUrl: ""
+
+    readonly property var browserModel: browser
+    readonly property var notificationsModel: notifications
+    readonly property var downloadsModel: downloads
+    readonly property var themesModel: themes
+    readonly property var modsModel: mods
+
+    property int pendingPermissionTabId: 0
+    property int pendingPermissionRequestId: 0
+    property string pendingPermissionOrigin: ""
+    property int pendingPermissionKind: 0
+    property bool pendingPermissionUserInitiated: false
+
+    QtObject {
+        id: tabViews
+        property var byId: ({})
+        property int revision: 0
+    }
+
+    readonly property int focusedTabId: splitView.enabled ? splitView.tabIdForPane(splitView.focusedPane) : tabIdForActiveIndex()
+
+    readonly property var primaryView: {
+        tabViews.revision
+        const tabId = splitView.enabled ? splitView.tabIdForPane(0) : tabIdForActiveIndex()
+        return tabViews.byId[tabId] || null
+    }
+
+    readonly property var secondaryView: {
+        tabViews.revision
+        if (!splitView.enabled || splitView.paneCount < 2) {
+            return null
+        }
+        const tabId = splitView.tabIdForPane(1)
+        return tabViews.byId[tabId] || null
+    }
+
+    readonly property var focusedView: {
+        tabViews.revision
+        return tabViews.byId[focusedTabId] || null
+    }
+
+    readonly property var mediaView: {
+        tabViews.revision
+        if (splitView.enabled && splitView.paneTabIds) {
+            const ids = splitView.paneTabIds
+            for (const tabId of ids) {
+                const view = tabViews.byId[Number(tabId || 0)]
+                if (view && view.documentPlayingAudio) {
+                    return view
+                }
+            }
+        }
+        return focusedView || primaryView || secondaryView
+    }
+
+    onFocusedViewChanged: {
+        syncAddressFieldFromFocused()
+        syncExtensionsHost()
+    }
 
     background: Rectangle {
         gradient: Gradient {
@@ -52,7 +189,7 @@ ApplicationWindow {
             MenuItem { text: "New Tab"; onTriggered: commands.invoke("new-tab") }
             MenuItem { text: "Close Tab"; onTriggered: commands.invoke("close-tab") }
             MenuSeparator { }
-            MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url") }
+            MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
             MenuSeparator { }
             MenuItem { text: "Quit"; onTriggered: Qt.quit() }
         }
@@ -62,6 +199,12 @@ ApplicationWindow {
             MenuItem { text: "Toggle Sidebar"; onTriggered: commands.invoke("toggle-sidebar") }
             MenuItem { text: "Toggle Address Bar"; onTriggered: commands.invoke("toggle-addressbar") }
             MenuItem { text: "Toggle Compact Mode"; onTriggered: commands.invoke("toggle-compact-mode") }
+            MenuItem {
+                text: "Reduce Motion"
+                checkable: true
+                checked: browser.settings.reduceMotion
+                onTriggered: commands.invoke("toggle-reduce-motion")
+            }
             MenuItem {
                 text: "Back closes tab"
                 checkable: true
@@ -75,14 +218,16 @@ ApplicationWindow {
 
         Menu {
             title: "Tools"
-            MenuItem { text: "Themes"; onTriggered: themesDialog.open() }
-            MenuItem { text: "Downloads"; onTriggered: downloadsDialog.open() }
+            MenuItem { text: "Themes"; onTriggered: root.openOverlay(themesDialogComponent, "themes") }
+            MenuItem { text: "Mods"; onTriggered: commands.invoke("open-mods") }
+            MenuItem { text: "Extensions"; onTriggered: commands.invoke("open-extensions") }
+            MenuItem { text: "Downloads"; onTriggered: root.openOverlay(downloadsDialogComponent, "downloads") }
             MenuItem { text: "DevTools"; onTriggered: commands.invoke("open-devtools") }
         }
 
         Menu {
             title: "Help"
-            MenuItem { text: "Welcome"; onTriggered: onboardingDialog.open() }
+            MenuItem { text: "Welcome"; onTriggered: root.openOverlay(onboardingDialogComponent, "onboarding") }
             MenuItem { text: "About"; onTriggered: toast.showToast("XBrowser " + Qt.application.version) }
         }
     }
@@ -107,47 +252,1060 @@ ApplicationWindow {
         }
     }
 
+    function currentFocusedUrlString() {
+        const view = focusedView
+        if (view && view.currentUrl) {
+            return view.currentUrl.toString()
+        }
+
+        const url = urlForTabId(focusedTabId)
+        return url ? url.toString() : ""
+    }
+
+    function currentFocusedOriginString() {
+        const view = focusedView
+        let url = null
+        if (view && view.currentUrl) {
+            url = view.currentUrl
+        }
+        if (!url) {
+            url = urlForTabId(focusedTabId)
+        }
+        if (!url) {
+            return ""
+        }
+
+        if (url.scheme && url.scheme.length > 0 && url.host && url.host.length > 0) {
+            let origin = url.scheme + "://" + url.host
+            if (url.port && url.port > 0) {
+                origin += ":" + url.port
+            }
+            return origin
+        }
+
+        return url.toString()
+    }
+
+    function syncAddressFieldFromFocused(force) {
+        const shouldForce = force === true
+        if (!shouldForce && addressField.activeFocus) {
+            return
+        }
+
+        const nextText = currentFocusedUrlString()
+        if (addressField.text === nextText) {
+            return
+        }
+
+        suppressNextOmniboxUpdate = true
+        addressField.text = nextText
+    }
+
+    function interpretOmniboxInput(text) {
+        const raw = (text || "").trim()
+        if (!raw) {
+            return { kind: "empty", url: "", display: "" }
+        }
+
+        const lower = raw.toLowerCase()
+        const looksLikeUrl = lower.includes("://")
+                             || lower.startsWith("about:")
+                             || lower.startsWith("file:")
+                             || lower.startsWith("edge:")
+                             || (!lower.includes(" ") && (lower.includes(".") || lower.startsWith("localhost")))
+
+        if (looksLikeUrl) {
+            const url = (lower.includes("://") || lower.startsWith("about:") || lower.startsWith("file:") || lower.startsWith("edge:"))
+                            ? raw
+                            : ("https://" + raw)
+            return { kind: "url", url: url, display: url }
+        }
+
+        const q = encodeURIComponent(raw)
+        const searchUrl = "https://duckduckgo.com/?q=" + q
+        return { kind: "search", url: searchUrl, display: raw }
+    }
+
+    function navigateFromOmnibox(text) {
+        const parsed = interpretOmniboxInput(text)
+        if (!parsed || !parsed.url || parsed.url.length === 0) {
+            return
+        }
+
+        if (root.focusedView) {
+            root.focusedView.navigate(parsed.url)
+        } else {
+            commands.invoke("new-tab", { url: parsed.url })
+        }
+    }
+
+    function fuzzyScore(query, target) {
+        const q = (query || "").toLowerCase()
+        const t = (target || "").toLowerCase()
+        if (!q) {
+            return 0
+        }
+
+        let ti = 0
+        let score = 0
+        for (let qi = 0; qi < q.length; qi++) {
+            const ch = q[qi]
+            const found = t.indexOf(ch, ti)
+            if (found < 0) {
+                return -1
+            }
+            score += found === ti ? 3 : 1
+            ti = found + 1
+        }
+        return score
+    }
+
+    function matchRange(query, text) {
+        const q = (query || "").trim().toLowerCase()
+        const t = (text || "")
+        if (!q || !t) {
+            return { start: -1, length: 0 }
+        }
+        const idx = t.toLowerCase().indexOf(q)
+        return idx >= 0 ? { start: idx, length: q.length } : { start: -1, length: 0 }
+    }
+
+    function syncTabViews() {
+        if (!browser.tabs) {
+            return
+        }
+
+        const wanted = {}
+        for (let i = 0; i < browser.tabs.count(); i++) {
+            const tabId = browser.tabs.tabIdAt(i)
+            if (tabId <= 0) {
+                continue
+            }
+
+            const key = String(tabId)
+            wanted[key] = true
+
+            if (!tabViews.byId[tabId]) {
+                const view = tabWebViewComponent.createObject(contentHost, { tabId: tabId })
+                if (view) {
+                    tabViews.byId[tabId] = view
+                }
+            }
+        }
+
+        const toRemove = []
+        for (const key in tabViews.byId) {
+            if (!wanted[key]) {
+                toRemove.push(key)
+            }
+        }
+
+        for (const key of toRemove) {
+            const view = tabViews.byId[key]
+            if (view) {
+                view.destroy()
+            }
+            delete tabViews.byId[key]
+        }
+
+        tabViews.revision++
+        syncAddressFieldFromFocused()
+        syncExtensionsHost()
+    }
+
+    function syncExtensionsHost() {
+        if (!extensions) {
+            return
+        }
+        const view = root.focusedView || root.primaryView || root.secondaryView
+        extensions.hostView = view ? view : null
+    }
+
+    function openExtensionsPanel(anchorItem) {
+        if (!anchorItem) {
+            return
+        }
+        popupManager.openAtItem(extensionsPanelComponent, anchorItem)
+        root.popupManagerContext = "extensions-panel"
+    }
+
+    function openExtensionPopup(anchorItem, extensionId, name, popupUrl, optionsUrl) {
+        const id = String(extensionId || "")
+        const popup = String(popupUrl || "")
+        const options = String(optionsUrl || "")
+
+        if (!popup || popup.length === 0) {
+            if (options && options.length > 0) {
+                commands.invoke("new-tab", { url: options })
+            } else {
+                commands.invoke("new-tab", { url: "edge://extensions" })
+            }
+            return
+        }
+
+        if (!anchorItem) {
+            anchorItem = extensionsButton
+        }
+
+        extensionPopupExtensionId = id
+        extensionPopupName = String(name || id || "Extension")
+        extensionPopupUrl = popup
+        extensionPopupOptionsUrl = options
+
+        popupManager.openAtItem(extensionPopupComponent, anchorItem)
+        root.popupManagerContext = "extension-popup"
+    }
+
+    function buildExtensionContextMenuItems(extensionId, name, enabled, pinned, popupUrl, optionsUrl) {
+        const id = String(extensionId || "")
+        const displayName = String(name || id || "Extension")
+        const popup = String(popupUrl || "")
+        const options = String(optionsUrl || "")
+        const isEnabled = enabled === true
+        const isPinned = pinned === true
+
+        if (!id || id.length === 0) {
+            return []
+        }
+
+        const baseArgs = {
+            extensionId: id,
+            name: displayName,
+            popupUrl: popup,
+            optionsUrl: options,
+            enabled: isEnabled,
+            pinned: isPinned,
+        }
+
+        const items = []
+        items.push({
+            action: "ext-open-popup",
+            text: popup && popup.length > 0 ? "Open popup" : "Open",
+            enabled: true,
+            args: baseArgs,
+        })
+        if (options && options.length > 0) {
+            items.push({ action: "ext-open-options", text: "Options", enabled: true, args: baseArgs })
+        }
+        items.push({ separator: true })
+        items.push({
+            action: isPinned ? "ext-unpin" : "ext-pin",
+            text: isPinned ? "Unpin from toolbar" : "Pin to toolbar",
+            enabled: true,
+            args: baseArgs,
+        })
+        items.push({
+            action: isEnabled ? "ext-disable" : "ext-enable",
+            text: isEnabled ? "Disable" : "Enable",
+            enabled: true,
+            args: baseArgs,
+        })
+        items.push({ separator: true })
+        items.push({ action: "ext-remove", text: "Remove", enabled: true, args: baseArgs })
+        items.push({ action: "ext-manage", text: "Manage extensions", enabled: true, args: {} })
+        return items
+    }
+
+    function handleExtensionContextMenuAction(action, args, anchorItem) {
+        if (!extensions) {
+            return
+        }
+
+        const id = String(args && args.extensionId ? args.extensionId : "")
+        if (!id || id.length === 0) {
+            return
+        }
+
+        const displayName = String(args && args.name ? args.name : id)
+        const popupUrl = String(args && args.popupUrl ? args.popupUrl : "")
+        const optionsUrl = String(args && args.optionsUrl ? args.optionsUrl : "")
+        const isEnabled = args && args.enabled === true
+        const isPinned = args && args.pinned === true
+
+        if (action === "ext-open-popup") {
+            if (!isEnabled) {
+                toast.showToast("Extension is disabled")
+                commands.invoke("open-extensions")
+                return
+            }
+            root.openExtensionPopup(anchorItem, id, displayName, popupUrl, optionsUrl)
+            return
+        }
+
+        if (action === "ext-open-options") {
+            if (optionsUrl && optionsUrl.length > 0) {
+                commands.invoke("new-tab", { url: optionsUrl })
+            } else {
+                commands.invoke("new-tab", { url: "edge://extensions" })
+            }
+            return
+        }
+
+        if (action === "ext-pin") {
+            extensions.setExtensionPinned(id, true)
+            return
+        }
+
+        if (action === "ext-unpin") {
+            extensions.setExtensionPinned(id, false)
+            return
+        }
+
+        if (action === "ext-enable") {
+            extensions.setExtensionEnabled(id, true)
+            return
+        }
+
+        if (action === "ext-disable") {
+            extensions.setExtensionEnabled(id, false)
+            return
+        }
+
+        if (action === "ext-remove") {
+            extensions.removeExtension(id)
+            return
+        }
+
+        if (action === "ext-manage") {
+            commands.invoke("open-extensions")
+            return
+        }
+    }
+
+    function pushModsCss(targetView) {
+        const css = root.modsModel && root.modsModel.combinedCss ? String(root.modsModel.combinedCss) : ""
+        const payload = JSON.stringify({ type: "xbrowser-mods-css", css: css })
+
+        if (targetView) {
+            targetView.postWebMessageAsJson(payload)
+            return
+        }
+
+        for (const key in tabViews.byId) {
+            const view = tabViews.byId[key]
+            if (view) {
+                view.postWebMessageAsJson(payload)
+            }
+        }
+    }
+
+    function handleWebMessage(tabId, json, senderView) {
+        let msg = null
+        try {
+            msg = JSON.parse(json)
+        } catch (e) {
+            return
+        }
+
+        if (msg && msg.type === "xbrowser-mods-ready") {
+            root.pushModsCss(senderView)
+            return
+        }
+
+        if (msg && msg.type === "glance" && msg.href) {
+            root.glanceUrl = msg.href
+            root.openOverlay(glanceOverlayComponent, "glance")
+        }
+    }
+
+    function handleDownloadStarted(uri, resultFilePath) {
+        downloads.addStarted(uri, resultFilePath)
+        toast.showToast("Download started", "Downloads", "open-downloads", 3500)
+    }
+
+    function handleDownloadFinished(uri, resultFilePath, success) {
+        downloads.markFinished(uri, resultFilePath, success)
+        if (success) {
+            toast.showToast("Download finished", "Open", "open-latest-download-file", 6000)
+        } else {
+            toast.showToast("Download failed", "Downloads", "open-downloads", 6000)
+        }
+    }
+
+    function openWebContextMenu(tabId, info) {
+        const view = tabViews.byId[tabId]
+        if (!view || !info) {
+            return
+        }
+
+        popupManager.close()
+
+        webContextMenuTabId = tabId
+        webContextMenuInfo = info
+
+        const items = []
+        items.push({ action: "back", text: "Back", enabled: view.canGoBack })
+        items.push({ action: "forward", text: "Forward", enabled: view.canGoForward })
+        items.push({ action: "reload", text: "Reload", enabled: true })
+
+        const link = info.linkUri ? String(info.linkUri) : ""
+        const src = info.sourceUri ? String(info.sourceUri) : ""
+        if (link.length > 0 || src.length > 0) {
+            items.push({ separator: true })
+        }
+        if (link.length > 0) {
+            items.push({ action: "open-link-new-tab", text: "Open link in new tab", enabled: true })
+            items.push({ action: "copy-link", text: "Copy link address", enabled: true })
+        }
+        if (src.length > 0 && (!link || src !== link)) {
+            items.push({ action: "open-source-new-tab", text: "Open media in new tab", enabled: true })
+            items.push({ action: "copy-source", text: "Copy media address", enabled: true })
+        }
+
+        webContextMenuItems = items
+
+        const x = Number(info.x || 0)
+        const y = Number(info.y || 0)
+        const pos = root.contentItem.mapToItem(popupManager, x, y)
+        popupManager.openAtPoint(webContextMenuComponent, pos.x, pos.y)
+        popupManagerContext = "web-context-menu"
+    }
+
+    function handleWebContextMenuAction(action) {
+        const view = tabViews.byId[webContextMenuTabId]
+        const info = webContextMenuInfo || {}
+        const link = info.linkUri ? String(info.linkUri) : ""
+        const src = info.sourceUri ? String(info.sourceUri) : ""
+
+        if (action === "back" && view) {
+            view.goBack()
+        } else if (action === "forward" && view) {
+            view.goForward()
+        } else if (action === "reload" && view) {
+            view.reload()
+        } else if (action === "open-link-new-tab" && link.length > 0) {
+            commands.invoke("new-tab", { url: link })
+        } else if (action === "copy-link" && link.length > 0) {
+            commands.invoke("copy-text", { text: link })
+        } else if (action === "open-source-new-tab" && src.length > 0) {
+            commands.invoke("new-tab", { url: src })
+        } else if (action === "copy-source" && src.length > 0) {
+            commands.invoke("copy-text", { text: src })
+        }
+    }
+
+    function tabIdsForSelectionArgs(args) {
+        if (args && args.tabIds !== undefined && args.tabIds !== null) {
+            return args.tabIds
+        }
+        if (browser.tabs && browser.tabs.selectedTabIds) {
+            return browser.tabs.selectedTabIds()
+        }
+        return []
+    }
+
+    function selectedTabsAllEssential(tabIds) {
+        if (!browser.tabs || !browser.tabs.indexOfTabId || !browser.tabs.isEssentialAt) {
+            return false
+        }
+        for (const id of tabIds) {
+            const idx = browser.tabs.indexOfTabId(Number(id))
+            if (idx < 0) {
+                continue
+            }
+            if (!browser.tabs.isEssentialAt(idx)) {
+                return false
+            }
+        }
+        return tabIds.length > 0
+    }
+
+    function prepareContextMenuSelection(tabId) {
+        if (!browser.tabs || !browser.tabs.selectOnlyById || !browser.tabs.isSelectedById) {
+            return
+        }
+        const resolved = Number(tabId || 0)
+        if (resolved <= 0) {
+            return
+        }
+
+        const count = Number(browser.tabs.selectedCount || 0)
+        if (count <= 0) {
+            browser.tabs.selectOnlyById(resolved)
+            return
+        }
+
+        if (!browser.tabs.isSelectedById(resolved)) {
+            browser.tabs.selectOnlyById(resolved)
+        }
+    }
+
+    function handleTabRowClick(listView, model, index, tabId, modifiers, activateOnPlainClick) {
+        if (!browser.tabs) {
+            return
+        }
+
+        const resolvedTabId = Number(tabId || 0)
+        if (resolvedTabId <= 0) {
+            return
+        }
+
+        const mods = Number(modifiers || 0)
+        const ctrl = (mods & Qt.ControlModifier) !== 0
+        const shift = (mods & Qt.ShiftModifier) !== 0
+
+        if (listView) {
+            listView.currentIndex = index
+            listView.forceActiveFocus()
+        }
+
+        if (shift && model && model.tabIdsInRange && browser.tabs.setSelectionByIds) {
+            if (listView && listView.selectionAnchorIndex === undefined) {
+                listView.selectionAnchorIndex = -1
+            }
+            if (listView && listView.selectionAnchorIndex < 0) {
+                listView.selectionAnchorIndex = index
+            }
+
+            const ids = model.tabIdsInRange(listView ? listView.selectionAnchorIndex : index, index)
+            browser.tabs.setSelectionByIds(ids, !ctrl)
+            return
+        }
+
+        if (listView && listView.selectionAnchorIndex !== undefined) {
+            listView.selectionAnchorIndex = index
+        }
+
+        if (ctrl && browser.tabs.setSelectedById && browser.tabs.isSelectedById) {
+            browser.tabs.setSelectedById(resolvedTabId, !browser.tabs.isSelectedById(resolvedTabId))
+            return
+        }
+
+        if (browser.tabs.selectOnlyById) {
+            browser.tabs.selectOnlyById(resolvedTabId)
+        }
+        if (activateOnPlainClick) {
+            browser.activateTabById(resolvedTabId)
+        }
+    }
+
+    function buildTabContextMenuItems(tabId, isEssential, groupId) {
+        const resolvedTabId = Number(tabId || 0)
+        const pinned = isEssential === true
+        const resolvedGroupId = Number(groupId || 0)
+
+        const selectionCount = browser.tabs ? Number(browser.tabs.selectedCount || 0) : 0
+        const isSelected = browser.tabs && browser.tabs.isSelectedById ? browser.tabs.isSelectedById(resolvedTabId) : false
+        const useSelection = selectionCount > 1 && isSelected
+        const selectedIds = useSelection ? (browser.tabs.selectedTabIds ? browser.tabs.selectedTabIds() : []) : []
+        const selectionAllPinned = useSelection ? selectedTabsAllEssential(selectedIds) : false
+
+        const items = []
+        if (useSelection) {
+            items.push({ action: "close-tabs", text: "Close " + selectionCount + " Tabs", enabled: true, args: { tabIds: selectedIds } })
+            items.push({ action: "duplicate-tabs", text: "Duplicate " + selectionCount + " Tabs", enabled: true, args: { tabIds: selectedIds } })
+            items.push({ separator: true })
+            items.push({
+                action: selectionAllPinned ? "unpin-tabs" : "pin-tabs",
+                text: selectionAllPinned ? "Unpin from Essentials" : "Pin to Essentials",
+                enabled: true,
+                args: { tabIds: selectedIds }
+            })
+            items.push({ separator: true })
+            items.push({ action: "new-group-tabs", text: "New Group from Selection", enabled: true, args: { tabIds: selectedIds } })
+            items.push({ action: "ungroup-tabs", text: "Ungroup Selection", enabled: true, args: { tabIds: selectedIds } })
+        } else {
+            items.push({ action: "close-tab", text: "Close Tab", enabled: true, args: { tabId: resolvedTabId } })
+            items.push({ action: "duplicate-tab", text: "Duplicate Tab", enabled: true, args: { tabId: resolvedTabId } })
+            items.push({ separator: true })
+            items.push({ action: "copy-url", text: "Copy URL", enabled: true, args: { tabId: resolvedTabId } })
+            items.push({ action: "copy-title", text: "Copy Title", enabled: true, args: { tabId: resolvedTabId } })
+            items.push({ separator: true })
+            items.push({ action: "open-split-right", text: "Open in Split (Right)", enabled: true, args: { tabId: resolvedTabId } })
+            items.push({
+                action: "toggle-essential",
+                text: pinned ? "Unpin from Essentials" : "Pin to Essentials",
+                enabled: true,
+                args: { tabId: resolvedTabId }
+            })
+            items.push({ separator: true })
+            if (resolvedGroupId > 0) {
+                items.push({ action: "ungroup-tab", text: "Ungroup", enabled: true, args: { tabId: resolvedTabId } })
+            } else {
+                items.push({ action: "new-group", text: "New Group", enabled: true, args: { tabId: resolvedTabId } })
+            }
+        }
+
+        const groupCount = browser.tabGroups ? browser.tabGroups.count() : 0
+        for (let i = 0; i < groupCount; i++) {
+            const name = browser.tabGroups.nameAt(i)
+            const groupId = browser.tabGroups.groupIdAt(i)
+            if (useSelection) {
+                items.push({ action: "move-tabs-to-group", text: "Move Selection to " + name, enabled: true, args: { tabIds: selectedIds, groupId: groupId } })
+            } else {
+                items.push({ action: "move-to-group", text: "Move to " + name, enabled: true, args: { tabId: resolvedTabId, groupId: groupId } })
+            }
+        }
+
+        const wsCount = browser.workspaces ? browser.workspaces.count() : 0
+        for (let i = 0; i < wsCount; i++) {
+            const name = browser.workspaces.nameAt(i)
+            const isCurrent = i === browser.workspaces.activeIndex
+            items.push({
+                action: useSelection ? "move-tabs-to-workspace" : "move-to-workspace",
+                text: useSelection
+                          ? (isCurrent ? ("Move Selection to Workspace: " + name + " (Current)") : ("Move Selection to Workspace: " + name))
+                          : (isCurrent ? ("Move to Workspace: " + name + " (Current)") : ("Move to Workspace: " + name)),
+                enabled: !isCurrent,
+                args: useSelection ? ({ tabIds: selectedIds, workspaceIndex: i }) : ({ tabId: resolvedTabId, workspaceIndex: i })
+            })
+        }
+
+        return items
+    }
+
+    function handleTabContextMenuAction(action, args) {
+        if (action === "close-tabs") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                if (tabId > 0) {
+                    commands.invoke("close-tab", { tabId: tabId })
+                }
+            }
+            if (browser.tabs && browser.tabs.clearSelection) {
+                browser.tabs.clearSelection()
+            }
+            return
+        }
+
+        if (action === "duplicate-tabs") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                if (tabId > 0) {
+                    commands.invoke("duplicate-tab", { tabId: tabId })
+                }
+            }
+            return
+        }
+
+        if (action === "pin-tabs" || action === "unpin-tabs") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            const essential = action === "pin-tabs"
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                const idx = browser.tabs.indexOfTabId(tabId)
+                if (idx >= 0) {
+                    browser.tabs.setEssentialAt(idx, essential)
+                }
+            }
+            return
+        }
+
+        if (action === "new-group-tabs") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            if (tabIds.length === 0) {
+                return
+            }
+            const first = Number(tabIds[0])
+            if (first <= 0) {
+                return
+            }
+            const groupId = browser.createTabGroupForTab(first)
+            if (groupId > 0) {
+                for (let i = 1; i < tabIds.length; i++) {
+                    const tabId = Number(tabIds[i])
+                    if (tabId > 0) {
+                        browser.moveTabToGroup(tabId, groupId)
+                    }
+                }
+            }
+            return
+        }
+
+        if (action === "ungroup-tabs") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                if (tabId > 0) {
+                    browser.ungroupTab(tabId)
+                }
+            }
+            return
+        }
+
+        if (action === "move-tabs-to-group") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            const groupId = Number(args && args.groupId !== undefined ? args.groupId : 0)
+            if (groupId <= 0) {
+                return
+            }
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                if (tabId > 0) {
+                    browser.moveTabToGroup(tabId, groupId)
+                }
+            }
+            return
+        }
+
+        if (action === "move-tabs-to-workspace") {
+            const tabIds = tabIdsForSelectionArgs(args)
+            if (!args || args.workspaceIndex === undefined) {
+                return
+            }
+            const workspaceIndex = Number(args.workspaceIndex)
+            if (workspaceIndex < 0 || workspaceIndex >= browser.workspaces.count()) {
+                return
+            }
+            for (const id of tabIds) {
+                const tabId = Number(id)
+                if (tabId > 0) {
+                    browser.moveTabToWorkspace(tabId, workspaceIndex)
+                }
+            }
+            return
+        }
+
+        const tabId = Number(args && args.tabId !== undefined ? args.tabId : 0)
+        if (tabId <= 0) {
+            return
+        }
+
+        if (action === "close-tab") {
+            commands.invoke("close-tab", { tabId: tabId })
+        } else if (action === "duplicate-tab") {
+            commands.invoke("duplicate-tab", { tabId: tabId })
+        } else if (action === "copy-url") {
+            commands.invoke("copy-url", { tabId: tabId })
+        } else if (action === "copy-title") {
+            commands.invoke("copy-title", { tabId: tabId })
+        } else if (action === "open-split-right") {
+            if (!splitView.enabled) {
+                splitView.paneCount = 2
+                splitView.setTabIdForPane(0, root.tabIdForActiveIndex())
+                splitView.enabled = true
+            } else if (splitView.paneCount < 2) {
+                splitView.paneCount = 2
+            }
+
+            splitView.setTabIdForPane(1, tabId)
+            splitView.focusedPane = 1
+        } else if (action === "toggle-essential") {
+            commands.invoke("toggle-essential", { tabId: tabId })
+        } else if (action === "new-group") {
+            browser.createTabGroupForTab(tabId)
+        } else if (action === "ungroup-tab") {
+            browser.ungroupTab(tabId)
+        } else if (action === "move-to-group") {
+            const groupId = Number(args && args.groupId !== undefined ? args.groupId : 0)
+            if (groupId > 0) {
+                browser.moveTabToGroup(tabId, groupId)
+            }
+        } else if (action === "move-to-workspace") {
+            if (!args || args.workspaceIndex === undefined) {
+                return
+            }
+            const workspaceIndex = Number(args.workspaceIndex)
+            if (workspaceIndex < 0 || workspaceIndex >= browser.workspaces.count()) {
+                return
+            }
+            browser.moveTabToWorkspace(tabId, workspaceIndex)
+        }
+    }
+
+    function clearPendingPermission() {
+        pendingPermissionTabId = 0
+        pendingPermissionRequestId = 0
+        pendingPermissionOrigin = ""
+        pendingPermissionKind = 0
+        pendingPermissionUserInitiated = false
+    }
+
+    function respondPendingPermission(state, remember) {
+        const view = tabViews.byId[pendingPermissionTabId]
+        const reqId = pendingPermissionRequestId
+        clearPendingPermission()
+        if (view && reqId > 0) {
+            view.respondToPermissionRequest(reqId, state, remember === true)
+        }
+        popupManager.close()
+    }
+
+    function showPermissionDoorhanger(tabId, requestId, origin, kind, userInitiated) {
+        if (requestId <= 0) {
+            return
+        }
+
+        popupManager.close()
+
+        pendingPermissionTabId = tabId
+        pendingPermissionRequestId = requestId
+        pendingPermissionOrigin = origin || ""
+        pendingPermissionKind = Number(kind || 0)
+        pendingPermissionUserInitiated = userInitiated === true
+
+        if (!showTopBar || !sitePanelButton.visible) {
+            const x = Math.round(root.contentItem.width * 0.5 - 160)
+            const y = 56
+            const pos = root.contentItem.mapToItem(popupManager, x, y)
+            popupManager.openAtPoint(permissionDoorhangerComponent, pos.x, pos.y)
+        } else {
+            popupManager.openAtItem(permissionDoorhangerComponent, sitePanelButton)
+        }
+        popupManagerContext = "permission-doorhanger"
+    }
+
+    function omniboxPopupOpen() {
+        return root.popupManagerContext === "omnibox" && popupManager.opened
+    }
+
+    function currentOmniboxView() {
+        if (!omniboxPopupOpen()) {
+            return null
+        }
+        const item = popupManager.popupItem
+        return item && item.listView ? item.listView : null
+    }
+
+    function openOmniboxPopup() {
+        const trimmed = String(addressField.text || "").trim()
+        if (trimmed.length === 0) {
+            return
+        }
+
+        const pos = addressField.mapToItem(popupManager, 0, addressField.height)
+        popupManager.openAtPoint(omniboxPopupComponent, pos.x, pos.y)
+        root.popupManagerContext = "omnibox"
+    }
+
+    function closeOmniboxPopup() {
+        if (root.popupManagerContext === "omnibox") {
+            popupManager.close()
+        }
+    }
+
+    function openOverlay(component, context) {
+        if (!component) {
+            return
+        }
+        popupManager.close()
+        if (overlayHost.active) {
+            overlayHost.hide()
+        }
+        overlayHost.show(component)
+        root.overlayHostContext = context || ""
+    }
+
     function updateOmnibox() {
         if (!addressField.activeFocus) {
             return
         }
 
-        const raw = addressField.text || ""
-        if (!raw.startsWith(">")) {
-            omniboxPopup.close()
+        if (suppressNextOmniboxUpdate) {
+            suppressNextOmniboxUpdate = false
             return
         }
 
-        const query = raw.slice(1).trim().toLowerCase()
-        const actions = [
-            { title: "New Tab", command: "new-tab", args: {} },
-            { title: "Close Tab", command: "close-tab", args: {} },
-            { title: "Toggle Sidebar", command: "toggle-sidebar", args: {} },
-            { title: "Toggle Address Bar", command: "toggle-addressbar", args: {} },
-            { title: splitView.enabled ? "Unsplit View" : "Split View", command: "toggle-split-view", args: {} },
-            { title: "Copy URL", command: "copy-url", args: {} },
-            { title: "New Workspace", command: "new-workspace", args: {} },
-        ]
+        const raw = addressField.text || ""
+        omniboxQuery = raw
 
-        for (let i = 0; i < browser.workspaces.count(); i++) {
-            actions.push({
-                title: "Switch Workspace: " + browser.workspaces.nameAt(i),
-                command: "switch-workspace",
-                args: { index: i },
-            })
-        }
+        const trimmed = raw.trim()
+        const focusedUrl = currentFocusedUrlString()
 
         omniboxModel.clear()
-        for (const a of actions) {
-            if (!query || a.title.toLowerCase().includes(query)) {
-                omniboxModel.append(a)
+
+        if (!trimmed) {
+            root.closeOmniboxPopup()
+            return
+        }
+
+        const isCommandMode = trimmed.startsWith(">")
+        if (isCommandMode) {
+            const query = trimmed.slice(1).trim()
+            const baseCommands = [
+                { group: "Tabs", title: "New Tab", command: "new-tab", args: {}, shortcut: "Ctrl+T" },
+                { group: "Tabs", title: "Close Tab", command: "close-tab", args: { tabId: root.focusedTabId }, shortcut: "Ctrl+W" },
+                { group: "Tabs", title: "Restore Closed Tab", command: "restore-closed-tab", args: {}, shortcut: "Ctrl+Shift+T" },
+                { group: "Tabs", title: "Duplicate Tab", command: "duplicate-tab", args: { tabId: root.focusedTabId }, shortcut: "" },
+                { group: "Navigation", title: "Reload", command: "nav-reload", args: {}, shortcut: "Ctrl+R" },
+                 { group: "View", title: "Toggle Sidebar", command: "toggle-sidebar", args: {}, shortcut: "Ctrl+B" },
+                 { group: "View", title: "Toggle Address Bar", command: "toggle-addressbar", args: {}, shortcut: "Ctrl+Shift+L" },
+                 { group: "View", title: splitView.enabled ? "Unsplit View" : "Split View", command: "toggle-split-view", args: {}, shortcut: "Ctrl+E" },
+                 { group: "Tools", title: "Downloads", command: "open-downloads", args: {}, shortcut: "Ctrl+J" },
+                 { group: "Tools", title: "Mods", command: "open-mods", args: {}, shortcut: "" },
+                 { group: "Tools", title: "Extensions", command: "open-extensions", args: {}, shortcut: "" },
+                 { group: "Tools", title: "DevTools", command: "open-devtools", args: {}, shortcut: "F12" },
+                 { group: "Workspaces", title: "New Workspace", command: "new-workspace", args: {}, shortcut: "" },
+             ]
+
+            for (let i = 0; i < browser.workspaces.count(); i++) {
+                baseCommands.push({
+                    group: "Workspaces",
+                    title: "Switch Workspace: " + browser.workspaces.nameAt(i),
+                    command: "switch-workspace",
+                    args: { index: i },
+                    shortcut: i < 9 ? ("Alt+" + (i + 1)) : "",
+                })
+            }
+
+            const rows = []
+            for (const cmd of baseCommands) {
+                const score = fuzzyScore(query, cmd.title)
+                if (score >= 0) {
+                    rows.push({ score: score, cmd: cmd })
+                }
+            }
+            rows.sort((a, b) => b.score - a.score)
+
+            const grouped = {}
+            for (const row of rows) {
+                const g = row.cmd.group || "Commands"
+                if (!grouped[g]) {
+                    grouped[g] = []
+                }
+                grouped[g].push(row.cmd)
+            }
+
+            const groupOrder = ["Tabs", "Navigation", "View", "Tools", "Workspaces", "Commands"]
+            for (const g of groupOrder) {
+                const items = grouped[g]
+                if (!items || items.length === 0) {
+                    continue
+                }
+                omniboxModel.append({ type: "header", title: g })
+                for (const item of items.slice(0, 12)) {
+                    const range = matchRange(query, item.title)
+                    omniboxModel.append({
+                        type: "item",
+                        kind: "command",
+                        title: item.title,
+                        subtitle: item.command,
+                        command: item.command,
+                        args: item.args || {},
+                        shortcut: item.shortcut || "",
+                        matchStart: range.start,
+                        matchLength: range.length,
+                    })
+                }
+            }
+
+            if (omniboxModel.count > 0) {
+                if (!root.omniboxPopupOpen()) {
+                    root.openOmniboxPopup()
+                }
+
+                Qt.callLater(() => {
+                    const view = root.currentOmniboxView()
+                    if (view) {
+                        view.currentIndex = view.firstSelectableIndex()
+                    }
+                })
+            } else {
+                root.closeOmniboxPopup()
+            }
+            return
+        }
+
+        if (raw === focusedUrl && addressField.selectedText && addressField.selectedText.length === raw.length) {
+            root.closeOmniboxPopup()
+            return
+        }
+
+        const parsed = interpretOmniboxInput(trimmed)
+        const navTitle = parsed.kind === "search" ? ("Search: " + parsed.display) : ("Go to: " + parsed.display)
+        omniboxModel.append({ type: "header", title: parsed.kind === "search" ? "Search" : "Navigate" })
+        omniboxModel.append({
+            type: "item",
+            kind: parsed.kind,
+            title: navTitle,
+            subtitle: parsed.kind === "search" ? parsed.url : parsed.display,
+            url: parsed.url,
+            shortcut: "",
+            matchStart: -1,
+            matchLength: 0,
+        })
+
+        const tabHits = []
+        const tabQuery = trimmed.toLowerCase()
+        for (let i = 0; i < browser.tabs.count(); i++) {
+            const title = browser.tabs.titleAt(i) || ""
+            const url = browser.tabs.urlAt(i)
+            const urlText = url ? url.toString() : ""
+            const hay = (title + " " + urlText).toLowerCase()
+            if (!tabQuery || hay.includes(tabQuery)) {
+                tabHits.push({
+                    tabId: browser.tabs.tabIdAt(i),
+                    title: title.length > 0 ? title : urlText,
+                    subtitle: urlText,
+                    faviconUrl: browser.tabs.faviconUrlAt ? browser.tabs.faviconUrlAt(i) : "",
+                    range: matchRange(trimmed, title.length > 0 ? title : urlText),
+                })
+            }
+        }
+        tabHits.sort((a, b) => {
+            const ai = browser.tabs.indexOfTabId ? browser.tabs.indexOfTabId(a.tabId) : -1
+            const bi = browser.tabs.indexOfTabId ? browser.tabs.indexOfTabId(b.tabId) : -1
+            const at = ai >= 0 && browser.tabs.lastActivatedMsAt ? browser.tabs.lastActivatedMsAt(ai) : 0
+            const bt = bi >= 0 && browser.tabs.lastActivatedMsAt ? browser.tabs.lastActivatedMsAt(bi) : 0
+            return bt - at
+        })
+
+        if (tabHits.length > 0) {
+            omniboxModel.append({ type: "header", title: "Tabs" })
+            for (const t of tabHits.slice(0, 8)) {
+                omniboxModel.append({
+                    type: "item",
+                    kind: "tab",
+                    title: t.title,
+                    subtitle: t.subtitle,
+                    tabId: t.tabId,
+                    faviconUrl: t.faviconUrl,
+                    shortcut: "",
+                    matchStart: t.range.start,
+                    matchLength: t.range.length,
+                })
+            }
+        }
+
+        const wsHits = []
+        for (let i = 0; i < browser.workspaces.count(); i++) {
+            const name = browser.workspaces.nameAt(i) || ""
+            const score = fuzzyScore(trimmed, name)
+            if (score >= 0) {
+                wsHits.push({
+                    score: score,
+                    index: i,
+                    title: name,
+                    shortcut: i < 9 ? ("Alt+" + (i + 1)) : "",
+                    range: matchRange(trimmed, name),
+                })
+            }
+        }
+        wsHits.sort((a, b) => b.score - a.score)
+        if (wsHits.length > 0) {
+            omniboxModel.append({ type: "header", title: "Workspaces" })
+            for (const ws of wsHits.slice(0, 6)) {
+                omniboxModel.append({
+                    type: "item",
+                    kind: "workspace",
+                    title: ws.title,
+                    subtitle: "Switch workspace",
+                    workspaceIndex: ws.index,
+                    shortcut: ws.shortcut,
+                    matchStart: ws.range.start,
+                    matchLength: ws.range.length,
+                })
             }
         }
 
         if (omniboxModel.count > 0) {
-            omniboxPopup.open()
+            if (!root.omniboxPopupOpen()) {
+                root.openOmniboxPopup()
+            }
+
+            Qt.callLater(() => {
+                const view = root.currentOmniboxView()
+                if (!view) {
+                    return
+                }
+                if (!view.isSelectableIndex(view.currentIndex)) {
+                    view.currentIndex = view.firstSelectableIndex()
+                }
+            })
         } else {
-            omniboxPopup.close()
+            root.closeOmniboxPopup()
         }
     }
 
@@ -247,24 +1405,29 @@ ApplicationWindow {
                 Button {
                     text: "Themes"
                     onClicked: {
+                        root.openOverlay(themesDialogComponent, "themes")
+                    }
+                }
+
+                Button {
+                    text: "Extensions"
+                    onClicked: {
                         popupManager.close()
-                        themesDialog.open()
+                        commands.invoke("open-extensions")
                     }
                 }
 
                 Button {
                     text: "Downloads"
                     onClicked: {
-                        popupManager.close()
-                        downloadsDialog.open()
+                        root.openOverlay(downloadsDialogComponent, "downloads")
                     }
                 }
 
                 Button {
                     text: "Welcome"
                     onClicked: {
-                        popupManager.close()
-                        onboardingDialog.open()
+                        root.openOverlay(onboardingDialogComponent, "onboarding")
                     }
                 }
             }
@@ -290,7 +1453,9 @@ ApplicationWindow {
                 spacing: root.uiSpacing
 
                 Label {
-                    text: web.currentUrl.host.length > 0 ? web.currentUrl.host : web.currentUrl.toString()
+                    text: root.focusedView
+                              ? (root.focusedView.currentUrl.host.length > 0 ? root.focusedView.currentUrl.host : root.focusedView.currentUrl.toString())
+                              : ""
                     elide: Text.ElideRight
                     font.bold: true
                 }
@@ -299,7 +1464,7 @@ ApplicationWindow {
                     text: "Copy URL"
                     onClicked: {
                         popupManager.close()
-                        commands.invoke("copy-url")
+                        commands.invoke("copy-url", { tabId: root.focusedTabId })
                     }
                 }
 
@@ -307,16 +1472,20 @@ ApplicationWindow {
                     text: "Share URL"
                     onClicked: {
                         popupManager.close()
-                        commands.invoke("share-url")
+                        commands.invoke("share-url", { tabId: root.focusedTabId })
                     }
                 }
 
                 Button {
                     text: "Permissions"
                     onClicked: {
-                        popupManager.close()
-                        toast.showToast("Permissions panel not implemented")
+                        popupManager.openAtItem(sitePermissionsPanelComponent, sitePanelButton)
                     }
+                }
+
+                Button {
+                    text: "Extensions"
+                    onClicked: root.openExtensionsPanel(sitePanelButton)
                 }
 
                 Button {
@@ -324,6 +1493,358 @@ ApplicationWindow {
                     onClicked: {
                         popupManager.close()
                         commands.invoke("open-devtools")
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: sitePermissionsPanelComponent
+
+        SitePermissionsPanel {
+            cornerRadius: root.uiRadius
+            spacing: root.uiSpacing
+            store: sitePermissions
+            origin: root.currentFocusedOriginString()
+            onCloseRequested: popupManager.close()
+        }
+    }
+
+    Component {
+        id: extensionsPanelComponent
+
+        Rectangle {
+            color: Qt.rgba(1, 1, 1, 0.98)
+            radius: root.uiRadius
+            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.width: 1
+
+            implicitWidth: 360
+            implicitHeight: Math.min(520, panelColumn.implicitHeight + 16)
+
+            ColumnLayout {
+                id: panelColumn
+                anchors.fill: parent
+                anchors.margins: root.uiSpacing
+                spacing: root.uiSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root.uiSpacing
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Extensions"
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    ToolButton {
+                        text: "Manage"
+                        onClicked: {
+                            popupManager.close()
+                            commands.invoke("open-extensions")
+                        }
+                    }
+
+                    ToolButton {
+                        text: "×"
+                        onClicked: popupManager.close()
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    placeholderText: "Search extensions"
+                    text: root.extensionsPanelSearch
+                    selectByMouse: true
+                    onTextChanged: root.extensionsPanelSearch = text
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    ListView {
+                        id: extList
+                        anchors.fill: parent
+                        clip: true
+                        model: extensions
+
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        delegate: ItemDelegate {
+                            width: ListView.view.width
+                            hoverEnabled: true
+                            visible: {
+                                const q = String(root.extensionsPanelSearch || "").trim().toLowerCase()
+                                if (!q) {
+                                    return true
+                                }
+                                const n = String(name || "").toLowerCase()
+                                const id = String(extensionId || "").toLowerCase()
+                                return n.indexOf(q) >= 0 || id.indexOf(q) >= 0
+                            }
+                            height: visible ? implicitHeight : 0
+
+                            background: Rectangle {
+                                radius: 8
+                                color: parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"
+                            }
+
+                            contentItem: RowLayout {
+                                anchors.fill: parent
+                                spacing: root.uiSpacing
+
+                                Item {
+                                    width: 20
+                                    height: 20
+                                    Layout.alignment: Qt.AlignVCenter
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 6
+                                        color: Qt.rgba(0, 0, 0, 0.06)
+                                        border.width: 1
+                                        border.color: Qt.rgba(0, 0, 0, 0.08)
+                                        visible: !(iconUrl && iconUrl.toString().length > 0)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: name && name.length > 0 ? name[0].toUpperCase() : ""
+                                            font.pixelSize: 10
+                                            opacity: 0.65
+                                        }
+                                    }
+
+                                    Image {
+                                        anchors.fill: parent
+                                        source: iconUrl
+                                        asynchronous: true
+                                        cache: true
+                                        fillMode: Image.PreserveAspectFit
+                                        visible: iconUrl && iconUrl.toString().length > 0
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: name && name.length > 0 ? name : extensionId
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: extensionId
+                                        opacity: 0.55
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        visible: extensionId && extensionId.length > 0
+                                    }
+                                }
+
+                                ToolButton {
+                                    text: pinned ? "Unpin" : "Pin"
+                                    onClicked: extensions.setExtensionPinned(extensionId, !pinned)
+                                }
+
+                                Switch {
+                                    checked: enabled === true
+                                    onToggled: extensions.setExtensionEnabled(extensionId, checked)
+                                }
+
+                                ToolButton {
+                                    text: "Open"
+                                    enabled: enabled === true
+                                    onClicked: {
+                                        popupManager.close()
+                                        root.openExtensionPopup(extensionsButton, extensionId, name, popupUrl, optionsUrl)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: extensionPopupComponent
+
+        Rectangle {
+            color: Qt.rgba(1, 1, 1, 0.98)
+            border.color: Qt.rgba(0, 0, 0, 0.10)
+            border.width: 1
+
+            implicitWidth: 420
+            implicitHeight: 560
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 34
+                    color: Qt.rgba(0, 0, 0, 0.04)
+                    border.color: Qt.rgba(0, 0, 0, 0.08)
+                    border.width: 0
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.extensionPopupName
+                            elide: Text.ElideRight
+                        }
+
+                        ToolButton {
+                            text: "Options"
+                            visible: root.extensionPopupOptionsUrl && root.extensionPopupOptionsUrl.length > 0
+                            onClicked: {
+                                popupManager.close()
+                                commands.invoke("new-tab", { url: root.extensionPopupOptionsUrl })
+                            }
+                        }
+
+                        ToolButton {
+                            text: "Open tab"
+                            visible: root.extensionPopupUrl && root.extensionPopupUrl.length > 0
+                            onClicked: {
+                                popupManager.close()
+                                commands.invoke("new-tab", { url: root.extensionPopupUrl })
+                            }
+                        }
+
+                        ToolButton {
+                            text: "×"
+                            onClicked: popupManager.close()
+                        }
+                    }
+                }
+
+                WebView2View {
+                    id: extPopupWeb
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Component.onCompleted: {
+                        if (root.extensionPopupUrl && root.extensionPopupUrl.length > 0) {
+                            navigate(root.extensionPopupUrl)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: downloadsPanelComponent
+
+        Rectangle {
+            color: Qt.rgba(1, 1, 1, 0.98)
+            radius: root.uiRadius
+            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.width: 1
+
+            implicitWidth: 420
+            implicitHeight: panelColumn.implicitHeight + root.uiSpacing * 2
+
+            ColumnLayout {
+                id: panelColumn
+                anchors.fill: parent
+                anchors.margins: root.uiSpacing
+                spacing: root.uiSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root.uiSpacing
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Downloads"
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    Button {
+                        text: "Clear"
+                        enabled: downloadsList.count > downloads.activeCount
+                        onClicked: downloads.clearFinished()
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: downloads.activeCount > 0 ? ("Active: " + downloads.activeCount) : "No active downloads"
+                    opacity: 0.75
+                    font.pixelSize: 12
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+
+                    ListView {
+                        id: downloadsList
+                        width: parent.width
+                        implicitHeight: Math.min(contentHeight, 360)
+                        clip: true
+                        model: downloads
+
+                        delegate: ItemDelegate {
+                            width: ListView.view.width
+
+                            contentItem: RowLayout {
+                                spacing: theme.spacing
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Math.max(2, Math.round(theme.spacing / 4))
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: uri && uri.length > 0 ? uri : filePath
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: state
+                                        opacity: 0.7
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                Button {
+                                    text: "Open"
+                                    enabled: filePath && filePath.length > 0
+                                    onClicked: downloads.openFile(downloadId)
+                                }
+
+                                Button {
+                                    text: "Folder"
+                                    enabled: filePath && filePath.length > 0
+                                    onClicked: downloads.openFolder(downloadId)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    Layout.alignment: Qt.AlignRight
+                    text: "Open Full List…"
+                    onClicked: {
+                        root.openOverlay(downloadsDialogComponent, "downloads")
                     }
                 }
             }
@@ -376,8 +1897,16 @@ ApplicationWindow {
                             onClicked: {
                                 const idx = browser.newTab(root.glanceUrl)
                                 if (idx >= 0) {
-                                    splitView.enabled = true
-                                    splitView.secondaryTabId = browser.tabs.tabIdAt(idx)
+                                    const tabId = browser.tabs.tabIdAt(idx)
+                                    if (!splitView.enabled) {
+                                        splitView.paneCount = 2
+                                        splitView.setTabIdForPane(0, root.tabIdForActiveIndex())
+                                        splitView.enabled = true
+                                    } else if (splitView.paneCount < 2) {
+                                        splitView.paneCount = 2
+                                    }
+                                    splitView.setTabIdForPane(1, tabId)
+                                    splitView.focusedPane = 1
                                 }
                                 overlayHost.hide()
                             }
@@ -393,7 +1922,58 @@ ApplicationWindow {
                         id: glanceWeb
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Component.onCompleted: navigate(root.glanceUrl)
+                        Component.onCompleted: {
+                            if (root.modsBootstrapScript && root.modsBootstrapScript.length > 0) {
+                                addScriptOnDocumentCreated(root.modsBootstrapScript)
+                            }
+                            navigate(root.glanceUrl)
+                        }
+
+                        onWebMessageReceived: (json) => root.handleWebMessage(0, json, glanceWeb)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: !glanceWeb.initialized && glanceWeb.initError && glanceWeb.initError.length > 0
+                            color: Qt.rgba(1, 1, 1, 0.96)
+                            border.color: Qt.rgba(0, 0, 0, 0.08)
+                            border.width: 1
+                            radius: theme.cornerRadius
+
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                width: Math.min(parent.width - 48, 520)
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Web engine unavailable"
+                                    font.bold: true
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: glanceWeb.initError
+                                    wrapMode: Text.Wrap
+                                    opacity: 0.85
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: theme.spacing
+
+                                    Button {
+                                        text: "Install WebView2 Runtime"
+                                        onClicked: Qt.openUrlExternally("https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+                                    }
+
+                                    Button {
+                                        text: "Retry"
+                                        onClicked: glanceWeb.retryInitialize()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -412,6 +1992,9 @@ ApplicationWindow {
             addressField,
             emojiButton,
             newTabButton,
+            extensionsToolbar,
+            extensionsButton,
+            downloadsButton,
             mainMenuButton
         ])
         windowChrome.setMinimizeButtonItem(windowMinimizeButton)
@@ -423,15 +2006,15 @@ ApplicationWindow {
         }
 
         if (!browser.settings.onboardingSeen) {
-            onboardingDialog.open()
+            root.openOverlay(onboardingDialogComponent, "onboarding")
         }
 
         const glanceScript = `
-(() => {
-  if (window.__xbrowserGlanceInstalled) return;
-  window.__xbrowserGlanceInstalled = true;
-  document.addEventListener('click', (e) => {
-    if (!e.altKey) return;
+  (() => {
+    if (window.__xbrowserGlanceInstalled) return;
+   window.__xbrowserGlanceInstalled = true;
+   document.addEventListener('click', (e) => {
+     if (!e.altKey) return;
     const t = e.target;
     const a = t && t.closest ? t.closest('a[href]') : null;
     if (!a) return;
@@ -440,16 +2023,23 @@ ApplicationWindow {
     try {
       window.chrome?.webview?.postMessage({ type: 'glance', href: a.href });
     } catch (_) {}
-  }, true);
-})();
-`
-        web.addScriptOnDocumentCreated(glanceScript)
-        webSecondary.addScriptOnDocumentCreated(glanceScript)
+   }, true);
+  })();
+  `
+        root.glanceScript = glanceScript
+
+        if (splitView) {
+            splitView.enabledChanged.connect(syncSplitViews)
+            splitView.tabsChanged.connect(syncSplitViews)
+            splitView.focusedPaneChanged.connect(syncSplitViews)
+        }
+        Qt.callLater(syncTabViews)
     }
 
     header: ToolBar {
         id: topBar
-        height: showTopBar ? implicitHeight : root.windowControlButtonHeight
+        readonly property int expandedHeight: 56
+        height: showTopBar ? expandedHeight : root.windowControlButtonHeight
         leftPadding: 6
         rightPadding: 0
         topPadding: 0
@@ -474,20 +2064,20 @@ ApplicationWindow {
                 id: backButton
                 visible: showTopBar
                 text: "←"
-                enabled: web.canGoBack
+                enabled: root.focusedView ? root.focusedView.canGoBack : false
                 onClicked: commands.invoke("nav-back")
             }
             ToolButton {
                 id: forwardButton
                 visible: showTopBar
                 text: "→"
-                enabled: web.canGoForward
+                enabled: root.focusedView ? root.focusedView.canGoForward : false
                 onClicked: commands.invoke("nav-forward")
             }
             ToolButton {
                 id: reloadButton
                 visible: showTopBar
-                text: web.isLoading ? "⟳…" : "⟳"
+                text: (root.focusedView && root.focusedView.isLoading) ? "⟳…" : "⟳"
                 onClicked: commands.invoke("nav-reload")
             }
 
@@ -509,16 +2099,79 @@ ApplicationWindow {
                 selectByMouse: true
                 onTextChanged: updateOmnibox()
                 onActiveFocusChanged: {
-                    if (!activeFocus) {
-                        omniboxPopup.close()
-                    }
-                }
-                onAccepted: {
-                    if (omniboxPopup.opened) {
-                        omniboxView.activateCurrent()
+                    if (activeFocus) {
+                        Qt.callLater(() => addressField.selectAll())
                         return
                     }
-                    web.navigate(text)
+                    root.closeOmniboxPopup()
+                }
+                onAccepted: {
+                    if (root.omniboxPopupOpen()) {
+                        const view = root.currentOmniboxView()
+                        if (view) {
+                            view.activateCurrent()
+                        }
+                        return
+                    }
+                    if ((text || "").trim().startsWith(">")) {
+                        return
+                    }
+                    root.navigateFromOmnibox(text)
+                    addressField.focus = false
+                }
+
+                Keys.onPressed: (event) => {
+                    if (event.key === Qt.Key_Down) {
+                        if (!root.omniboxPopupOpen()) {
+                            updateOmnibox()
+                            Qt.callLater(() => {
+                                const view = root.currentOmniboxView()
+                                if (view) {
+                                    view.currentIndex = view.firstSelectableIndex()
+                                }
+                            })
+                        } else {
+                            const view = root.currentOmniboxView()
+                            if (view) {
+                                view.moveSelection(1)
+                            }
+                        }
+                        event.accepted = true
+                        return
+                    }
+                    if (event.key === Qt.Key_Up) {
+                        const view = root.currentOmniboxView()
+                        if (view) {
+                            view.moveSelection(-1)
+                            event.accepted = true
+                        }
+                        return
+                    }
+                    if (event.key === Qt.Key_Tab) {
+                        const view = root.currentOmniboxView()
+                        if (view) {
+                            view.activateCurrent()
+                            event.accepted = true
+                        }
+                        return
+                    }
+                }
+
+                Keys.onEscapePressed: (event) => {
+                    if (root.omniboxPopupOpen()) {
+                        root.closeOmniboxPopup()
+                        event.accepted = true
+                        return
+                    }
+                    const currentUrl = root.currentFocusedUrlString()
+                    if (addressField.text !== currentUrl) {
+                        root.syncAddressFieldFromFocused(true)
+                        Qt.callLater(() => addressField.selectAll())
+                        event.accepted = true
+                        return
+                    }
+                    addressField.focus = false
+                    event.accepted = true
                 }
             }
 
@@ -535,12 +2188,7 @@ ApplicationWindow {
                 id: emojiButton
                 visible: showTopBar
                 text: "😊"
-                onClicked: {
-                    const pos = emojiButton.mapToItem(root.contentItem, 0, emojiButton.height)
-                    emojiPicker.x = Math.max(8, Math.min(root.contentItem.width - emojiPicker.implicitWidth - 8, Math.round(pos.x)))
-                    emojiPicker.y = Math.max(8, Math.min(root.contentItem.height - emojiPicker.implicitHeight - 8, Math.round(pos.y)))
-                    emojiPicker.open()
-                }
+                onClicked: popupManager.openAtItem(emojiPickerComponent, emojiButton)
             }
 
             ToolButton {
@@ -551,6 +2199,86 @@ ApplicationWindow {
                     commands.invoke("new-tab", { url: "about:blank" })
                     commands.invoke("focus-address")
                 }
+            }
+
+            RowLayout {
+                id: extensionsToolbar
+                visible: showTopBar
+                spacing: 2
+
+                Repeater {
+                    model: extensions
+
+                    delegate: ToolButton {
+                        id: pinnedExtensionButton
+                        required property string extensionId
+                        required property string name
+                        required property bool enabled
+                        required property bool pinned
+                        required property var iconUrl
+                        required property string popupUrl
+                        required property string optionsUrl
+
+                        visible: pinned
+                        display: (iconUrl && iconUrl.toString().length > 0) ? AbstractButton.IconOnly : AbstractButton.TextOnly
+                        icon.source: iconUrl
+                        icon.width: 18
+                        icon.height: 18
+                        text: name && name.length > 0 ? name[0].toUpperCase() : ""
+                        opacity: enabled ? 1.0 : 0.45
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: (name && name.length > 0 ? name : extensionId) + (enabled ? "" : " (disabled)")
+
+                        onClicked: {
+                            if (!enabled) {
+                                toast.showToast("Extension is disabled")
+                                commands.invoke("open-extensions")
+                                return
+                            }
+                            root.openExtensionPopup(pinnedExtensionButton, extensionId, name, popupUrl, optionsUrl)
+                        }
+
+                        Component {
+                            id: extensionContextMenuComponent
+
+                            ContextMenu {
+                                cornerRadius: root.uiRadius
+                                spacing: root.uiSpacing
+                                implicitWidth: 240
+                                items: root.buildExtensionContextMenuItems(extensionId, name, enabled, pinned, popupUrl, optionsUrl)
+                                onActionTriggered: (action, args) => {
+                                    popupManager.close()
+                                    root.handleExtensionContextMenuAction(action, args, pinnedExtensionButton)
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.RightButton
+                            onClicked: (mouse) => {
+                                const pos = mapToItem(popupManager, mouse.x, mouse.y)
+                                popupManager.openAtPoint(extensionContextMenuComponent, pos.x, pos.y)
+                            }
+                        }
+                    }
+                }
+            }
+
+            ToolButton {
+                id: extensionsButton
+                visible: showTopBar
+                text: "Ext"
+                enabled: extensions && extensions.ready === true
+                onClicked: root.openExtensionsPanel(extensionsButton)
+            }
+
+            ToolButton {
+                id: downloadsButton
+                visible: showTopBar
+                text: downloads.activeCount > 0 ? ("↓" + downloads.activeCount) : "↓"
+                onClicked: popupManager.openAtItem(downloadsPanelComponent, downloadsButton)
             }
 
             ToolButton {
@@ -573,7 +2301,9 @@ ApplicationWindow {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: pressed ? Qt.rgba(0, 0, 0, 0.12) : (hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                        color: parent.pressed
+                                   ? Qt.rgba(0, 0, 0, 0.12)
+                                   : (parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
@@ -593,7 +2323,9 @@ ApplicationWindow {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: pressed ? Qt.rgba(0, 0, 0, 0.12) : (hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                        color: parent.pressed
+                                   ? Qt.rgba(0, 0, 0, 0.12)
+                                   : (parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
@@ -613,12 +2345,12 @@ ApplicationWindow {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: pressed ? "#c50f1f" : (hovered ? "#e81123" : "transparent")
+                        color: parent.pressed ? "#c50f1f" : (parent.hovered ? "#e81123" : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
                         text: "×"
-                        color: hovered || pressed ? "#ffffff" : "#1f1f1f"
+                        color: parent.hovered || parent.pressed ? "#ffffff" : "#1f1f1f"
                         font.pixelSize: 16
                     }
                 }
@@ -630,57 +2362,294 @@ ApplicationWindow {
         id: omniboxModel
     }
 
-    Popup {
-        id: omniboxPopup
-        parent: root.contentItem
-        modal: false
-        focus: false
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    Component {
+        id: omniboxPopupComponent
 
-        x: addressField.mapToItem(root.contentItem, 0, addressField.height).x
-        y: addressField.mapToItem(root.contentItem, 0, addressField.height).y
-        width: addressField.width
+        Rectangle {
+            id: omniboxPopupRoot
+            color: Qt.rgba(1, 1, 1, 0.98)
+            radius: root.uiRadius
+            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.width: 1
 
-        onClosed: omniboxModel.clear()
+            implicitWidth: Math.max(1, addressField.width)
+            implicitHeight: omniboxView.implicitHeight
+            width: implicitWidth
+            height: implicitHeight
 
-        contentItem: ListView {
-            id: omniboxView
-            implicitHeight: Math.min(contentHeight, 240)
-            clip: true
-            model: omniboxModel
-            currentIndex: 0
+            property alias listView: omniboxView
+
+            ListView {
+                id: omniboxView
+                anchors.fill: parent
+                implicitHeight: Math.min(contentHeight, 240)
+                clip: true
+                model: omniboxModel
+                currentIndex: -1
+
+            function isSelectableIndex(idx) {
+                if (idx < 0 || idx >= omniboxModel.count) {
+                    return false
+                }
+                const item = omniboxModel.get(idx)
+                return item && item.type !== "header"
+            }
+
+            function firstSelectableIndex() {
+                for (let i = 0; i < omniboxModel.count; i++) {
+                    if (isSelectableIndex(i)) {
+                        return i
+                    }
+                }
+                return -1
+            }
+
+            function moveSelection(delta) {
+                const count = omniboxModel.count
+                if (count <= 0) {
+                    return
+                }
+
+                let idx = currentIndex
+                if (idx < 0) {
+                    idx = firstSelectableIndex()
+                    if (idx < 0) {
+                        return
+                    }
+                    currentIndex = idx
+                    positionViewAtIndex(idx, ListView.Visible)
+                    return
+                }
+
+                for (let step = 0; step < count; step++) {
+                    idx = (idx + delta + count) % count
+                    if (isSelectableIndex(idx)) {
+                        currentIndex = idx
+                        positionViewAtIndex(idx, ListView.Visible)
+                        return
+                    }
+                }
+            }
 
             function activateCurrent() {
-                if (currentIndex < 0 || currentIndex >= count) {
+                let idx = currentIndex
+                if (!isSelectableIndex(idx)) {
+                    idx = firstSelectableIndex()
+                    if (!isSelectableIndex(idx)) {
+                        return
+                    }
+                    currentIndex = idx
+                }
+                if (idx < 0 || idx >= omniboxModel.count) {
                     return
                 }
-                const item = omniboxModel.get(currentIndex)
-                if (!item || !item.command) {
+                const item = omniboxModel.get(idx)
+                if (!item) {
                     return
                 }
-                omniboxPopup.close()
-                commands.invoke(item.command, item.args || {})
-                addressField.text = ""
-                addressField.forceActiveFocus()
+                root.closeOmniboxPopup()
+
+                if (item.kind === "command") {
+                    commands.invoke(item.command, item.args || {})
+                    root.suppressNextOmniboxUpdate = true
+                    addressField.text = ""
+                    addressField.forceActiveFocus()
+                    return
+                }
+
+                if (item.kind === "tab") {
+                    browser.activateTabById(item.tabId)
+                    addressField.focus = false
+                    return
+                }
+
+                if (item.kind === "workspace") {
+                    commands.invoke("switch-workspace", { index: item.workspaceIndex })
+                    addressField.focus = false
+                    return
+                }
+
+                if (item.kind === "url" || item.kind === "search") {
+                    if (root.focusedView) {
+                        root.focusedView.navigate(item.url)
+                    } else {
+                        commands.invoke("new-tab", { url: item.url })
+                    }
+                    addressField.focus = false
+                    return
+                }
             }
 
             delegate: ItemDelegate {
                 width: ListView.view.width
-                text: title
+                height: type === "header" ? 28 : 44
+                enabled: type !== "header"
+                hoverEnabled: enabled
+                highlighted: enabled && ListView.isCurrentItem
+
+                background: Rectangle {
+                    radius: 6
+                    color: highlighted ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                }
+
                 onClicked: {
+                    if (!enabled) {
+                        return
+                    }
                     omniboxView.currentIndex = index
                     omniboxView.activateCurrent()
+                }
+
+                contentItem: Item {
+                    anchors.fill: parent
+                    anchors.margins: 8
+
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: type === "header"
+                            text: title
+                            font.pixelSize: 12
+                            opacity: 0.7
+                        }
+
+                        Item {
+                            Layout.preferredWidth: 22
+                            Layout.preferredHeight: 22
+                            visible: type !== "header"
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 6
+                                color: Qt.rgba(0, 0, 0, 0.06)
+                                visible: !(kind === "tab" && faviconUrl && faviconUrl.toString().length > 0)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: kind === "command" ? ">" : (kind === "tab" ? "T" : (kind === "workspace" ? "W" : (kind === "search" ? "S" : "U")))
+                                    opacity: 0.7
+                                    font.pixelSize: 10
+                                }
+                            }
+
+                            Image {
+                                anchors.fill: parent
+                                source: faviconUrl
+                                asynchronous: true
+                                cache: true
+                                fillMode: Image.PreserveAspectFit
+                                visible: kind === "tab" && faviconUrl && faviconUrl.toString().length > 0
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: type !== "header"
+                            spacing: 2
+
+                            Item {
+                                Layout.fillWidth: true
+                                height: titleRow.implicitHeight
+                                clip: true
+
+                                Row {
+                                    id: titleRow
+                                    anchors.fill: parent
+                                    spacing: 0
+
+                                    readonly property string textValue: title || ""
+                                    readonly property int start: matchStart !== undefined ? matchStart : -1
+                                    readonly property int length: matchLength !== undefined ? matchLength : 0
+                                    readonly property string pre: start >= 0 ? textValue.slice(0, start) : textValue
+                                    readonly property string mid: start >= 0 ? textValue.slice(start, start + length) : ""
+                                    readonly property string suf: start >= 0 ? textValue.slice(start + length) : ""
+
+                                    Text {
+                                        id: titlePrefix
+                                        text: titleRow.pre
+                                        font.pixelSize: 13
+                                        color: "#1f1f1f"
+                                    }
+                                    Text {
+                                        id: titleMatch
+                                        text: titleRow.mid
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: "#1f1f1f"
+                                    }
+                                    Text {
+                                        text: titleRow.suf
+                                        font.pixelSize: 13
+                                        color: "#1f1f1f"
+                                        elide: Text.ElideRight
+                                        width: Math.max(0, titleRow.width - titlePrefix.implicitWidth - titleMatch.implicitWidth)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: subtitle || ""
+                                font.pixelSize: 11
+                                opacity: 0.65
+                                elide: Text.ElideRight
+                                visible: subtitle && subtitle.length > 0
+                            }
+                        }
+
+                        Text {
+                            text: shortcut || ""
+                            visible: type !== "header" && shortcut && shortcut.length > 0
+                            opacity: 0.6
+                            font.pixelSize: 11
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                    }
                 }
             }
         }
     }
+    }
 
-    EmojiPicker {
-        id: emojiPicker
-        parent: root.contentItem
-        onEmojiSelected: (emoji) => {
-            insertEmojiInto(addressField, emoji)
-            emojiPicker.close()
+    Component {
+        id: webContextMenuComponent
+
+        ContextMenu {
+            cornerRadius: root.uiRadius
+            spacing: root.uiSpacing
+            maxHeight: Math.max(200, popupManager.height - root.uiSpacing * 2)
+            items: root.webContextMenuItems
+            onActionTriggered: (action, args) => {
+                popupManager.close()
+                root.handleWebContextMenuAction(action)
+            }
+        }
+    }
+
+    Component {
+        id: permissionDoorhangerComponent
+
+        PermissionDoorhanger {
+            cornerRadius: root.uiRadius
+            spacing: root.uiSpacing
+            origin: root.pendingPermissionOrigin
+            permissionKind: root.pendingPermissionKind
+            userInitiated: root.pendingPermissionUserInitiated
+            onResponded: (state, remember) => root.respondPendingPermission(state, remember)
+        }
+    }
+
+    Component {
+        id: emojiPickerComponent
+
+        EmojiPicker {
+            onEmojiSelected: (emoji) => {
+                insertEmojiInto(addressField, emoji)
+                popupManager.close()
+            }
         }
     }
 
@@ -692,8 +2661,16 @@ ApplicationWindow {
         hoverEnabled: true
         visible: browser.settings.compactMode && browser.settings.addressBarVisible
         z: 2000
-        onEntered: root.compactTopHover = true
-        onExited: root.compactTopHover = false
+        onEntered: {
+            compactTopExitTimer.stop()
+            compactTopEnterTimer.stop()
+            compactTopEnterTimer.start()
+        }
+        onExited: {
+            compactTopEnterTimer.stop()
+            compactTopExitTimer.stop()
+            compactTopExitTimer.start()
+        }
     }
 
     MouseArea {
@@ -704,8 +2681,16 @@ ApplicationWindow {
         hoverEnabled: true
         visible: browser.settings.compactMode && browser.settings.sidebarExpanded
         z: 2000
-        onEntered: root.compactSidebarHover = true
-        onExited: root.compactSidebarHover = false
+        onEntered: {
+            compactSidebarExitTimer.stop()
+            compactSidebarEnterTimer.stop()
+            compactSidebarEnterTimer.start()
+        }
+        onExited: {
+            compactSidebarEnterTimer.stop()
+            compactSidebarExitTimer.stop()
+            compactSidebarExitTimer.start()
+        }
     }
 
     RowLayout {
@@ -713,10 +2698,27 @@ ApplicationWindow {
         spacing: 0
 
         Rectangle {
+            id: sidebarPane
             Layout.preferredWidth: showSidebar ? browser.settings.sidebarWidth : 0
             Layout.fillHeight: true
-            visible: showSidebar
+            visible: true
+            opacity: showSidebar ? 1.0 : 0.0
+            clip: true
             color: Qt.rgba(0, 0, 0, 0.04)
+
+            Behavior on Layout.preferredWidth {
+                NumberAnimation {
+                    duration: browser.settings.reduceMotion ? 0 : theme.motionNormalMs
+                    easing.type: Easing.InOutCubic
+                }
+            }
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             HoverHandler {
                 onHoveredChanged: root.sidebarHovered = hovered
@@ -746,37 +2748,369 @@ ApplicationWindow {
                     text: "Essentials"
                     font.pixelSize: 12
                     opacity: 0.7
-                    visible: essentialsView.count > 0
+                    visible: !root.sidebarIconOnly && essentialsView.count > 0
+                }
+
+                GridView {
+                    id: essentialsGrid
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
+                    clip: true
+                    model: essentialsTabs
+                    readonly property bool active: root.sidebarIconOnly && count > 0
+                    visible: active
+                    activeFocusOnTab: true
+                    currentIndex: -1
+                    cellWidth: 40
+                    cellHeight: 40
+                    property int selectionAnchorIndex: -1
+
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Escape) {
+                            if (browser.tabs && browser.tabs.clearSelection) {
+                                browser.tabs.clearSelection()
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_A) {
+                            if (browser.tabs && browser.tabs.setSelectionByIds) {
+                                browser.tabs.setSelectionByIds(essentialsTabs.tabIds(), true)
+                            }
+                            essentialsGrid.selectionAnchorIndex = essentialsGrid.currentIndex >= 0 ? essentialsGrid.currentIndex : 0
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (essentialsGrid.currentItem && essentialsGrid.currentItem.tabId) {
+                                browser.activateTabById(essentialsGrid.currentItem.tabId)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Delete) {
+                            const selectedCount = browser.tabs ? Number(browser.tabs.selectedCount || 0) : 0
+                            if (selectedCount > 1) {
+                                root.handleTabContextMenuAction("close-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                            } else if (essentialsGrid.currentItem && essentialsGrid.currentItem.tabId) {
+                                commands.invoke("close-tab", { tabId: essentialsGrid.currentItem.tabId })
+                            }
+                            event.accepted = true
+                            return
+                        }
+                    }
+
+                    delegate: ItemDelegate {
+                        width: essentialsGrid.cellWidth
+                        height: essentialsGrid.cellHeight
+                        hoverEnabled: true
+                        highlighted: isActive || isSelected || (essentialsGrid.activeFocus && GridView.isCurrentItem)
+
+                        background: Rectangle {
+                            radius: 10
+                            color: isActive
+                                       ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16)
+                                       : (isSelected ? Qt.rgba(0, 0, 0, 0.10) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"))
+                            border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
+                            border.width: isActive ? 1 : 0
+                        }
+
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: root.handleTabRowClick(essentialsGrid, essentialsTabs, index, tabId, point.modifiers, true)
+                        }
+
+                        TapHandler {
+                            acceptedButtons: Qt.MiddleButton
+                            onTapped: commands.invoke("close-tab", { tabId: tabId })
+                        }
+
+                        contentItem: Item {
+                            anchors.fill: parent
+                            anchors.margins: 6
+
+                            Item {
+                                anchors.centerIn: parent
+                                width: 22
+                                height: 22
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 6
+                                    color: Qt.rgba(0, 0, 0, 0.08)
+                                    visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                        font.pixelSize: 10
+                                        opacity: 0.6
+                                    }
+                                }
+
+                                Image {
+                                    anchors.fill: parent
+                                    source: faviconUrl
+                                    asynchronous: true
+                                    cache: true
+                                    fillMode: Image.PreserveAspectFit
+                                    visible: faviconUrl && faviconUrl.toString().length > 0
+                                }
+                            }
+                        }
+                    }
                 }
 
                 ListView {
                     id: essentialsView
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(contentHeight, 120)
+                    Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
                     clip: true
                     model: essentialsTabs
-                    visible: count > 0
+                    readonly property bool active: !root.sidebarIconOnly && count > 0
+                    visible: active
+                    activeFocusOnTab: true
+                    currentIndex: -1
+                    property int selectionAnchorIndex: -1
+
+                    add: Transition {
+                        NumberAnimation {
+                            properties: "y,opacity"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    remove: Transition {
+                        NumberAnimation {
+                            properties: "y,opacity"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.InCubic
+                        }
+                    }
+                    move: Transition {
+                        NumberAnimation {
+                            properties: "y"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    displaced: Transition {
+                        NumberAnimation {
+                            properties: "y"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Escape) {
+                            if (browser.tabs && browser.tabs.clearSelection) {
+                                browser.tabs.clearSelection()
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_A) {
+                            if (browser.tabs && browser.tabs.setSelectionByIds) {
+                                browser.tabs.setSelectionByIds(essentialsTabs.tabIds(), true)
+                            }
+                            essentialsView.selectionAnchorIndex = essentialsView.currentIndex >= 0 ? essentialsView.currentIndex : 0
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Up) {
+                            const next = essentialsView.currentIndex > 0 ? (essentialsView.currentIndex - 1) : 0
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                if (essentialsView.selectionAnchorIndex < 0) {
+                                    essentialsView.selectionAnchorIndex = essentialsView.currentIndex >= 0 ? essentialsView.currentIndex : next
+                                }
+                                browser.tabs.setSelectionByIds(essentialsTabs.tabIdsInRange(essentialsView.selectionAnchorIndex, next), true)
+                                essentialsView.currentIndex = next
+                                essentialsView.positionViewAtIndex(essentialsView.currentIndex, ListView.Visible)
+                            } else if (essentialsView.currentIndex > 0) {
+                                essentialsView.currentIndex = next
+                                essentialsView.positionViewAtIndex(essentialsView.currentIndex, ListView.Visible)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Down) {
+                            const next = essentialsView.currentIndex < essentialsView.count - 1 ? (essentialsView.currentIndex + 1) : (essentialsView.count - 1)
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                if (essentialsView.selectionAnchorIndex < 0) {
+                                    essentialsView.selectionAnchorIndex = essentialsView.currentIndex >= 0 ? essentialsView.currentIndex : next
+                                }
+                                browser.tabs.setSelectionByIds(essentialsTabs.tabIdsInRange(essentialsView.selectionAnchorIndex, next), true)
+                                essentialsView.currentIndex = next
+                                essentialsView.positionViewAtIndex(essentialsView.currentIndex, ListView.Visible)
+                            } else if (essentialsView.currentIndex < essentialsView.count - 1) {
+                                essentialsView.currentIndex = next
+                                essentialsView.positionViewAtIndex(essentialsView.currentIndex, ListView.Visible)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (essentialsView.currentItem && essentialsView.currentItem.tabId) {
+                                browser.activateTabById(essentialsView.currentItem.tabId)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Delete) {
+                            const selectedCount = browser.tabs ? Number(browser.tabs.selectedCount || 0) : 0
+                            if (selectedCount > 1) {
+                                root.handleTabContextMenuAction("close-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                            } else if (essentialsView.currentItem && essentialsView.currentItem.tabId) {
+                                commands.invoke("close-tab", { tabId: essentialsView.currentItem.tabId })
+                            }
+                            event.accepted = true
+                            return
+                        }
+                    }
 
                     delegate: ItemDelegate {
                         width: ListView.view.width
                         text: title
-                        highlighted: isActive
-                        onClicked: browser.activateTabById(tabId)
+                        highlighted: isActive || isSelected || (essentialsView.activeFocus && ListView.isCurrentItem)
+                        hoverEnabled: true
+                        readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (essentialsView.activeFocus && ListView.isCurrentItem))
+
+                        background: Rectangle {
+                            radius: 8
+                            color: isActive
+                                       ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16)
+                                       : (isSelected ? Qt.rgba(0, 0, 0, 0.08) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"))
+                            border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
+                            border.width: isActive ? 1 : 0
+                        }
+
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: root.handleTabRowClick(essentialsView, essentialsTabs, index, tabId, point.modifiers, true)
+                        }
+
+                        TapHandler {
+                            acceptedButtons: Qt.MiddleButton
+                            onTapped: commands.invoke("close-tab", { tabId: tabId })
+                        }
 
                         contentItem: RowLayout {
                             spacing: 6
+                            Item {
+                                width: 18
+                                height: 18
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 4
+                                    color: Qt.rgba(0, 0, 0, 0.08)
+                                    visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                        font.pixelSize: 10
+                                        opacity: 0.6
+                                    }
+                                }
+
+                                Image {
+                                    anchors.fill: parent
+                                    source: faviconUrl
+                                    asynchronous: true
+                                    cache: true
+                                    fillMode: Image.PreserveAspectFit
+                                    visible: faviconUrl && faviconUrl.toString().length > 0
+                                }
+                            }
                             Label {
                                 Layout.fillWidth: true
+                                visible: !root.sidebarIconOnly
                                 text: title
                                 elide: Text.ElideRight
                             }
+                            Text {
+                                text: "⟳"
+                                Layout.preferredWidth: 18
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: !root.sidebarIconOnly
+                                opacity: isLoading ? 0.85 : 0.0
+
+                                NumberAnimation on rotation {
+                                    from: 0
+                                    to: 360
+                                    duration: 900
+                                    loops: Animation.Infinite
+                                    running: isLoading && !browser.settings.reduceMotion
+                                }
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                            Text {
+                                text: isMuted ? "🔇" : "🔊"
+                                Layout.preferredWidth: 18
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: !root.sidebarIconOnly
+                                opacity: isAudioPlaying ? 0.85 : 0.0
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
                             ToolButton {
                                 text: "\u2605"
+                                visible: !root.sidebarIconOnly
+                                opacity: showActions ? 1.0 : 0.0
+                                enabled: showActions
                                 onClicked: commands.invoke("toggle-essential", { tabId: tabId })
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
                             }
                             ToolButton {
                                 text: "\u00D7"
+                                visible: !root.sidebarIconOnly
+                                opacity: showActions ? 1.0 : 0.0
+                                enabled: showActions
                                 onClicked: commands.invoke("close-tab", { tabId: tabId })
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
                             }
                         }
                     }
@@ -795,8 +3129,13 @@ ApplicationWindow {
 
                     ToolButton {
                         text: "+"
-                        enabled: web.currentUrl.toString().length > 0
-                        onClicked: quickLinks.addLink(web.currentUrl, web.title)
+                        enabled: root.focusedView ? (root.focusedView.currentUrl.toString().length > 0) : false
+                        onClicked: {
+                            if (!root.focusedView) {
+                                return
+                            }
+                            quickLinks.addLink(root.focusedView.currentUrl, root.focusedView.title)
+                        }
                     }
                 }
 
@@ -813,10 +3152,81 @@ ApplicationWindow {
                     }
                 }
 
-                Label {
-                    text: "Tabs"
-                    font.pixelSize: 12
-                    opacity: 0.7
+                Item {
+                    Layout.fillWidth: true
+                    implicitHeight: tabsLabel.implicitHeight
+
+                    Label {
+                        id: tabsLabel
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Tabs"
+                        font.pixelSize: 12
+                        opacity: 0.7
+                    }
+
+                    DropArea {
+                        id: ungroupDropArea
+                        anchors.fill: parent
+                        keys: ["tab"]
+                        onDropped: (drop) => {
+                            const dragged = Number(drop.mimeData.tabId || 0)
+                            if (dragged > 0) {
+                                browser.ungroupTab(dragged)
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: Qt.rgba(0.2, 0.5, 1.0, 0.12)
+                        visible: ungroupDropArea.containsDrag
+                    }
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+                    visible: !root.sidebarIconOnly && browser.tabs && Number(browser.tabs.selectedCount || 0) > 1
+                    padding: 8
+
+                    background: Rectangle {
+                        radius: 10
+                        color: Qt.rgba(0, 0, 0, 0.05)
+                        border.color: Qt.rgba(0, 0, 0, 0.08)
+                        border.width: 1
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: browser.tabs.selectedCount + " selected"
+                            elide: Text.ElideRight
+                        }
+
+                        ToolButton {
+                            text: "Pin"
+                            onClicked: root.handleTabContextMenuAction(root.selectedTabsAllEssential(browser.tabs.selectedTabIds()) ? "unpin-tabs" : "pin-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                        }
+
+                        ToolButton {
+                            text: "Group"
+                            onClicked: root.handleTabContextMenuAction("new-group-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                        }
+
+                        ToolButton {
+                            text: "Close"
+                            onClicked: root.handleTabContextMenuAction("close-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                        }
+
+                        ToolButton {
+                            text: "Clear"
+                            onClicked: browser.tabs.clearSelection()
+                        }
+                    }
                 }
 
                 Repeater {
@@ -827,36 +3237,119 @@ ApplicationWindow {
                         spacing: 4
 
                         property bool searching: false
+                        property bool renaming: false
+                        property var groupColorPalette: ["#7c3aed", "#2563eb", "#059669", "#ea580c", "#db2777", "#0ea5e9"]
 
-                        RowLayout {
+                        function finishRename() {
+                            if (!renaming) {
+                                return
+                            }
+                            renaming = false
+                            browser.tabGroups.setNameAt(index, groupRenameField.text)
+                        }
+
+                        function cycleGroupColor() {
+                            const current = groupColor && groupColor.toString ? groupColor.toString().toLowerCase() : ""
+                            let i = groupColorPalette.indexOf(current)
+                            if (i < 0) {
+                                i = 0
+                            } else {
+                                i = (i + 1) % groupColorPalette.length
+                            }
+                            browser.tabGroups.setColorAt(index, groupColorPalette[i])
+                        }
+
+                        Item {
                             Layout.fillWidth: true
-                            spacing: 6
+                            implicitHeight: groupHeaderRow.implicitHeight
 
-                            ToolButton {
-                                text: collapsed ? "+" : "−"
-                                onClicked: browser.tabGroups.setCollapsedAt(index, !collapsed)
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 6
+                                color: Qt.rgba(0.2, 0.5, 1.0, 0.12)
+                                visible: groupHeaderDrop.containsDrag
                             }
 
-                            Label {
-                                Layout.fillWidth: true
-                                text: name
-                                elide: Text.ElideRight
-                                font.bold: true
-                            }
+                            RowLayout {
+                                id: groupHeaderRow
+                                anchors.fill: parent
+                                spacing: 6
 
-                            ToolButton {
-                                text: searching ? "\u2715" : "\u2315"
-                                onClicked: {
-                                    searching = !searching
-                                    if (!searching) {
-                                        searchField.text = ""
+                                ToolButton {
+                                    text: collapsed ? "+" : "−"
+                                    onClicked: browser.tabGroups.setCollapsedAt(index, !collapsed)
+                                }
+
+                                Rectangle {
+                                    width: 10
+                                    height: 10
+                                    radius: 3
+                                    color: groupColor
+                                    border.width: 1
+                                    border.color: Qt.rgba(0, 0, 0, 0.12)
+                                    Layout.alignment: Qt.AlignVCenter
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: cycleGroupColor()
                                     }
+                                }
+
+                                TextField {
+                                    id: groupRenameField
+                                    Layout.fillWidth: true
+                                    visible: renaming
+                                    text: name
+                                    selectByMouse: true
+                                    onAccepted: finishRename()
+                                    onEditingFinished: finishRename()
+                                    Keys.onEscapePressed: renaming = false
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: !renaming
+                                    text: name
+                                    elide: Text.ElideRight
+                                    font.bold: true
+
+                                    TapHandler {
+                                        acceptedButtons: Qt.LeftButton
+                                        onDoubleTapped: {
+                                            renaming = true
+                                            groupRenameField.text = name
+                                            groupRenameField.forceActiveFocus()
+                                            groupRenameField.selectAll()
+                                        }
+                                    }
+                                }
+
+                                ToolButton {
+                                    text: searching ? "\u2715" : "\u2315"
+                                    onClicked: {
+                                        searching = !searching
+                                        if (!searching) {
+                                            searchField.text = ""
+                                        }
+                                    }
+                                }
+
+                                ToolButton {
+                                    text: "\u00D7"
+                                    onClicked: browser.deleteTabGroup(groupId)
                                 }
                             }
 
-                            ToolButton {
-                                text: "\u00D7"
-                                onClicked: browser.deleteTabGroup(groupId)
+                            DropArea {
+                                id: groupHeaderDrop
+                                anchors.fill: parent
+                                keys: ["tab"]
+                                onDropped: (drop) => {
+                                    const dragged = Number(drop.mimeData.tabId || 0)
+                                    if (dragged > 0) {
+                                        browser.moveTabToGroup(dragged, groupId)
+                                    }
+                                }
                             }
                         }
 
@@ -878,64 +3371,188 @@ ApplicationWindow {
                         }
 
                         ListView {
+                            id: groupTabList
                             Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(contentHeight, 160)
+                            Layout.preferredHeight: collapsed ? 0 : Math.min(contentHeight, 160)
                             clip: true
-                            visible: !collapsed && count > 0
+                            opacity: collapsed ? 0.0 : 1.0
+                            enabled: !collapsed
+                            interactive: !collapsed
                             model: groupTabs
+                            activeFocusOnTab: true
+                            currentIndex: -1
+                            property int selectionAnchorIndex: -1
+
+                            Behavior on Layout.preferredHeight {
+                                NumberAnimation {
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+
+                            add: Transition {
+                                NumberAnimation {
+                                    properties: "y,opacity"
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            remove: Transition {
+                                NumberAnimation {
+                                    properties: "y,opacity"
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.InCubic
+                                }
+                            }
+                            move: Transition {
+                                NumberAnimation {
+                                    properties: "y"
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            displaced: Transition {
+                                NumberAnimation {
+                                    properties: "y"
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+
+                            Keys.onPressed: (event) => {
+                                if (event.key === Qt.Key_Escape) {
+                                    if (browser.tabs && browser.tabs.clearSelection) {
+                                        browser.tabs.clearSelection()
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+
+                                if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_A) {
+                                    if (browser.tabs && browser.tabs.setSelectionByIds) {
+                                        browser.tabs.setSelectionByIds(groupTabs.tabIds(), true)
+                                    }
+                                    groupTabList.selectionAnchorIndex = groupTabList.currentIndex >= 0 ? groupTabList.currentIndex : 0
+                                    event.accepted = true
+                                    return
+                                }
+
+                                if (event.key === Qt.Key_Up) {
+                                    const next = groupTabList.currentIndex > 0 ? (groupTabList.currentIndex - 1) : 0
+                                    if (event.modifiers & Qt.ShiftModifier) {
+                                        if (groupTabList.selectionAnchorIndex < 0) {
+                                            groupTabList.selectionAnchorIndex = groupTabList.currentIndex >= 0 ? groupTabList.currentIndex : next
+                                        }
+                                        browser.tabs.setSelectionByIds(groupTabs.tabIdsInRange(groupTabList.selectionAnchorIndex, next), true)
+                                        groupTabList.currentIndex = next
+                                        groupTabList.positionViewAtIndex(groupTabList.currentIndex, ListView.Visible)
+                                    } else if (groupTabList.currentIndex > 0) {
+                                        groupTabList.currentIndex = next
+                                        groupTabList.positionViewAtIndex(groupTabList.currentIndex, ListView.Visible)
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+
+                                if (event.key === Qt.Key_Down) {
+                                    const next = groupTabList.currentIndex < groupTabList.count - 1 ? (groupTabList.currentIndex + 1) : (groupTabList.count - 1)
+                                    if (event.modifiers & Qt.ShiftModifier) {
+                                        if (groupTabList.selectionAnchorIndex < 0) {
+                                            groupTabList.selectionAnchorIndex = groupTabList.currentIndex >= 0 ? groupTabList.currentIndex : next
+                                        }
+                                        browser.tabs.setSelectionByIds(groupTabs.tabIdsInRange(groupTabList.selectionAnchorIndex, next), true)
+                                        groupTabList.currentIndex = next
+                                        groupTabList.positionViewAtIndex(groupTabList.currentIndex, ListView.Visible)
+                                    } else if (groupTabList.currentIndex < groupTabList.count - 1) {
+                                        groupTabList.currentIndex = next
+                                        groupTabList.positionViewAtIndex(groupTabList.currentIndex, ListView.Visible)
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+
+                                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    if (groupTabList.currentItem && groupTabList.currentItem.tabId) {
+                                        browser.activateTabById(groupTabList.currentItem.tabId)
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+
+                                if (event.key === Qt.Key_Delete) {
+                                    const selectedCount = browser.tabs ? Number(browser.tabs.selectedCount || 0) : 0
+                                    if (selectedCount > 1) {
+                                        root.handleTabContextMenuAction("close-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                                    } else if (groupTabList.currentItem && groupTabList.currentItem.tabId) {
+                                        commands.invoke("close-tab", { tabId: groupTabList.currentItem.tabId })
+                                    }
+                                    event.accepted = true
+                                    return
+                                }
+                            }
 
                             delegate: ItemDelegate {
                                 width: ListView.view.width
                                 text: title
-                                highlighted: isActive
+                                highlighted: isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem)
+                                hoverEnabled: true
+                                property bool dropAfter: false
+                                readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem))
 
-                                Drag.active: tabDrag.active
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 500
+                                ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: isActive
+                                               ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16)
+                                               : (isSelected ? Qt.rgba(0, 0, 0, 0.08) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"))
+                                    border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
+                                    border.width: isActive ? 1 : 0
+                                }
+
+                                Drag.active: groupTabDrag.active
                                 Drag.hotSpot.x: width / 2
                                 Drag.hotSpot.y: height / 2
                                 Drag.keys: ["tab"]
                                 Drag.mimeData: ({ tabId: tabId })
                                 Drag.supportedActions: Qt.MoveAction
 
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    onTapped: root.handleTabRowClick(ListView.view, groupTabs, index, tabId, point.modifiers, true)
+                                }
+
                                 DragHandler {
-                                    id: tabDrag
+                                    id: groupTabDrag
                                     acceptedButtons: Qt.LeftButton
                                 }
 
-                                onClicked: browser.activateTabById(tabId)
+                                TapHandler {
+                                    acceptedButtons: Qt.MiddleButton
+                                    onTapped: commands.invoke("close-tab", { tabId: tabId })
+                                }
 
                                 Component {
-                                    id: tabContextMenuComponent
+                                    id: groupTabContextMenuComponent
 
-                                    Rectangle {
-                                        color: Qt.rgba(1, 1, 1, 0.98)
-                                        radius: root.uiRadius
-                                        border.color: Qt.rgba(0, 0, 0, 0.08)
-                                        border.width: 1
-
-                                        implicitWidth: 220
-                                        implicitHeight: menuColumn.implicitHeight + 16
-
-                                        ColumnLayout {
-                                            id: menuColumn
-                                            anchors.fill: parent
-                                            anchors.margins: root.uiSpacing
-                                            spacing: root.uiSpacing
-
-                                            Button {
-                                                text: "Close Tab"
-                                                onClicked: {
-                                                    popupManager.close()
-                                                    commands.invoke("close-tab", { tabId: tabId })
-                                                }
-                                            }
-
-                                            Button {
-                                                text: "Ungroup"
-                                                onClicked: {
-                                                    popupManager.close()
-                                                    browser.ungroupTab(tabId)
-                                                }
-                                            }
+                                    ContextMenu {
+                                        cornerRadius: root.uiRadius
+                                        spacing: root.uiSpacing
+                                        implicitWidth: 240
+                                        maxHeight: Math.max(200, sidebarPane.height - root.uiSpacing * 2)
+                                        items: root.buildTabContextMenuItems(tabId, isEssential, groupId)
+                                        onActionTriggered: (action, args) => {
+                                            popupManager.close()
+                                            root.handleTabContextMenuAction(action, args)
                                         }
                                     }
                                 }
@@ -944,18 +3561,192 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     acceptedButtons: Qt.RightButton
                                     onClicked: (mouse) => {
+                                        ListView.view.currentIndex = index
+                                        ListView.view.forceActiveFocus()
+                                        root.prepareContextMenuSelection(tabId)
                                         const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                        popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y)
+                                        popupManager.openAtPoint(groupTabContextMenuComponent, pos.x, pos.y, sidebarPane)
                                     }
                                 }
 
                                 DropArea {
+                                    id: groupReorderDrop
                                     anchors.fill: parent
                                     keys: ["tab"]
+                                    onPositionChanged: (drag) => dropAfter = drag.y > height * 0.5
                                     onDropped: (drop) => {
                                         const dragged = Number(drop.mimeData.tabId || 0)
                                         if (dragged > 0 && dragged !== tabId) {
-                                            browser.moveTabBefore(dragged, tabId)
+                                            if (dropAfter) {
+                                                browser.moveTabAfter(dragged, tabId)
+                                            } else {
+                                                browser.moveTabBefore(dragged, tabId)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 2
+                                    y: dropAfter ? (parent.height - height) : 0
+                                    color: theme.accentColor
+                                    opacity: groupReorderDrop.containsDrag ? 0.85 : 0.0
+                                    visible: opacity > 0
+                                    z: 10
+
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                }
+
+                                Timer {
+                                    interval: 16
+                                    repeat: true
+                                    running: groupTabDrag.active
+                                    onTriggered: {
+                                        const view = ListView.view
+                                        if (!view || view.contentHeight <= view.height) {
+                                            return
+                                        }
+                                        const pos = mapToItem(view, groupTabDrag.centroid.position.x, groupTabDrag.centroid.position.y)
+                                        const edge = 28
+                                        const speed = 14
+                                        let dir = 0
+                                        if (pos.y < edge) {
+                                            dir = -1
+                                        } else if (pos.y > view.height - edge) {
+                                            dir = 1
+                                        }
+                                        if (dir === 0) {
+                                            return
+                                        }
+                                        view.contentY = Math.max(0, Math.min(view.contentHeight - view.height, view.contentY + dir * speed))
+                                    }
+                                }
+
+                                contentItem: RowLayout {
+                                    spacing: 6
+                                    Item {
+                                        width: 18
+                                        height: 18
+                                        Layout.alignment: Qt.AlignVCenter
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 4
+                                            color: Qt.rgba(0, 0, 0, 0.08)
+                                            visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                                font.pixelSize: 10
+                                                opacity: 0.6
+                                            }
+                                        }
+
+                                        Image {
+                                            anchors.fill: parent
+                                            source: faviconUrl
+                                            asynchronous: true
+                                            cache: true
+                                            fillMode: Image.PreserveAspectFit
+                                            visible: faviconUrl && faviconUrl.toString().length > 0
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: !root.sidebarIconOnly
+                                        text: title
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        text: "⟳"
+                                        Layout.preferredWidth: 18
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.alignment: Qt.AlignVCenter
+                                        visible: !root.sidebarIconOnly
+                                        opacity: isLoading ? 0.85 : 0.0
+
+                                        NumberAnimation on rotation {
+                                            from: 0
+                                            to: 360
+                                            duration: 900
+                                            loops: Animation.Infinite
+                                            running: isLoading && !browser.settings.reduceMotion
+                                        }
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: isMuted ? "🔇" : "🔊"
+                                        Layout.preferredWidth: 18
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.alignment: Qt.AlignVCenter
+                                        visible: !root.sidebarIconOnly
+                                        opacity: isAudioPlaying ? 0.85 : 0.0
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                    }
+                                    ToolButton {
+                                        id: groupMoreButton
+                                        text: "⋯"
+                                        visible: !root.sidebarIconOnly
+                                        opacity: showActions ? 1.0 : 0.0
+                                        enabled: showActions
+                                        onClicked: {
+                                            root.prepareContextMenuSelection(tabId)
+                                            popupManager.openAtItem(groupTabContextMenuComponent, groupMoreButton, sidebarPane)
+                                        }
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                    }
+                                    ToolButton {
+                                        text: isEssential ? "★" : "☆"
+                                        visible: !root.sidebarIconOnly
+                                        opacity: showActions ? 1.0 : 0.0
+                                        enabled: showActions
+                                        onClicked: commands.invoke("toggle-essential", { tabId: tabId })
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                    }
+                                    ToolButton {
+                                        text: "×"
+                                        visible: !root.sidebarIconOnly
+                                        opacity: showActions ? 1.0 : 0.0
+                                        enabled: showActions
+                                        onClicked: commands.invoke("close-tab", { tabId: tabId })
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                                easing.type: Easing.OutCubic
+                                            }
                                         }
                                     }
                                 }
@@ -970,13 +3761,132 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     clip: true
                     model: regularTabs
+                    activeFocusOnTab: true
+                    currentIndex: -1
+                    property int selectionAnchorIndex: -1
+
+                    add: Transition {
+                        NumberAnimation {
+                            properties: "y,opacity"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    remove: Transition {
+                        NumberAnimation {
+                            properties: "y,opacity"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.InCubic
+                        }
+                    }
+                    move: Transition {
+                        NumberAnimation {
+                            properties: "y"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    displaced: Transition {
+                        NumberAnimation {
+                            properties: "y"
+                            duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Escape) {
+                            if (browser.tabs && browser.tabs.clearSelection) {
+                                browser.tabs.clearSelection()
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_A) {
+                            if (browser.tabs && browser.tabs.setSelectionByIds) {
+                                browser.tabs.setSelectionByIds(regularTabs.tabIds(), true)
+                            }
+                            tabList.selectionAnchorIndex = tabList.currentIndex >= 0 ? tabList.currentIndex : 0
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Up) {
+                            const next = tabList.currentIndex > 0 ? (tabList.currentIndex - 1) : 0
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                if (tabList.selectionAnchorIndex < 0) {
+                                    tabList.selectionAnchorIndex = tabList.currentIndex >= 0 ? tabList.currentIndex : next
+                                }
+                                browser.tabs.setSelectionByIds(regularTabs.tabIdsInRange(tabList.selectionAnchorIndex, next), true)
+                                tabList.currentIndex = next
+                                tabList.positionViewAtIndex(tabList.currentIndex, ListView.Visible)
+                            } else if (tabList.currentIndex > 0) {
+                                tabList.currentIndex = next
+                                tabList.positionViewAtIndex(tabList.currentIndex, ListView.Visible)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Down) {
+                            const next = tabList.currentIndex < tabList.count - 1 ? (tabList.currentIndex + 1) : (tabList.count - 1)
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                if (tabList.selectionAnchorIndex < 0) {
+                                    tabList.selectionAnchorIndex = tabList.currentIndex >= 0 ? tabList.currentIndex : next
+                                }
+                                browser.tabs.setSelectionByIds(regularTabs.tabIdsInRange(tabList.selectionAnchorIndex, next), true)
+                                tabList.currentIndex = next
+                                tabList.positionViewAtIndex(tabList.currentIndex, ListView.Visible)
+                            } else if (tabList.currentIndex < tabList.count - 1) {
+                                tabList.currentIndex = next
+                                tabList.positionViewAtIndex(tabList.currentIndex, ListView.Visible)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (tabList.currentItem && tabList.currentItem.tabId) {
+                                browser.activateTabById(tabList.currentItem.tabId)
+                            }
+                            event.accepted = true
+                            return
+                        }
+
+                        if (event.key === Qt.Key_Delete) {
+                            const selectedCount = browser.tabs ? Number(browser.tabs.selectedCount || 0) : 0
+                            if (selectedCount > 1) {
+                                root.handleTabContextMenuAction("close-tabs", { tabIds: browser.tabs.selectedTabIds() })
+                            } else if (tabList.currentItem && tabList.currentItem.tabId) {
+                                commands.invoke("close-tab", { tabId: tabList.currentItem.tabId })
+                            }
+                            event.accepted = true
+                            return
+                        }
+                    }
 
                     delegate: ItemDelegate {
                         width: ListView.view.width
                         text: title
-                        highlighted: isActive
-
+                        highlighted: isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem)
                         property bool renaming: false
+                        property bool dropAfter: false
+                        readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem))
+                        hoverEnabled: true
+
+                        ToolTip.visible: hovered && !renaming
+                        ToolTip.delay: 500
+                        ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+
+                        background: Rectangle {
+                            radius: 8
+                            color: isActive
+                                       ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16)
+                                       : (isSelected ? Qt.rgba(0, 0, 0, 0.08) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"))
+                            border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
+                            border.width: isActive ? 1 : 0
+                        }
 
                         Drag.active: tabDrag.active
                         Drag.hotSpot.x: width / 2
@@ -996,11 +3906,23 @@ ApplicationWindow {
 
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
+                            onTapped: root.handleTabRowClick(tabList, regularTabs, index, tabId, point.modifiers, true)
                             onDoubleTapped: {
+                                if (root.sidebarIconOnly) {
+                                    return
+                                }
+                                if ((point.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) !== 0) {
+                                    return
+                                }
                                 renaming = true
                                 renameField.forceActiveFocus()
                                 renameField.selectAll()
                             }
+                        }
+
+                        TapHandler {
+                            acceptedButtons: Qt.MiddleButton
+                            onTapped: commands.invoke("close-tab", { tabId: tabId })
                         }
 
                         DragHandler {
@@ -1008,63 +3930,18 @@ ApplicationWindow {
                             acceptedButtons: Qt.LeftButton
                         }
 
-                        onClicked: {
-                            browser.activateTabById(tabId)
-                        }
-
                         Component {
                             id: tabContextMenuComponent
 
-                            Rectangle {
-                                color: Qt.rgba(1, 1, 1, 0.98)
-                                radius: root.uiRadius
-                                border.color: Qt.rgba(0, 0, 0, 0.08)
-                                border.width: 1
-
-                                implicitWidth: 220
-                                implicitHeight: menuColumn.implicitHeight + 16
-
-                                ColumnLayout {
-                                    id: menuColumn
-                                    anchors.fill: parent
-                                    anchors.margins: root.uiSpacing
-                                    spacing: root.uiSpacing
-
-                                    Button {
-                                        text: "Close Tab"
-                                        onClicked: {
-                                            popupManager.close()
-                                            commands.invoke("close-tab", { tabId: tabId })
-                                        }
-                                    }
-
-                                    Button {
-                                        text: isEssential ? "Unpin from Essentials" : "Pin to Essentials"
-                                        onClicked: {
-                                            popupManager.close()
-                                            commands.invoke("toggle-essential", { tabId: tabId })
-                                        }
-                                    }
-
-                                    Button {
-                                        text: "New Group"
-                                        onClicked: {
-                                            popupManager.close()
-                                            browser.createTabGroupForTab(tabId)
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: browser.tabGroups
-
-                                        delegate: Button {
-                                            text: "Move to " + name
-                                            onClicked: {
-                                                popupManager.close()
-                                                browser.moveTabToGroup(tabId, groupId)
-                                            }
-                                        }
-                                    }
+                            ContextMenu {
+                                cornerRadius: root.uiRadius
+                                spacing: root.uiSpacing
+                                implicitWidth: 240
+                                maxHeight: Math.max(200, sidebarPane.height - root.uiSpacing * 2)
+                                items: root.buildTabContextMenuItems(tabId, isEssential, groupId)
+                                onActionTriggered: (action, args) => {
+                                    popupManager.close()
+                                    root.handleTabContextMenuAction(action, args)
                                 }
                             }
                         }
@@ -1073,28 +3950,108 @@ ApplicationWindow {
                             anchors.fill: parent
                             acceptedButtons: Qt.RightButton
                             onClicked: (mouse) => {
+                                tabList.currentIndex = index
+                                tabList.forceActiveFocus()
+                                root.prepareContextMenuSelection(tabId)
                                 const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y)
+                                popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y, sidebarPane)
                             }
                         }
 
                         DropArea {
+                            id: reorderDrop
                             anchors.fill: parent
                             keys: ["tab"]
+                            onPositionChanged: (drag) => dropAfter = drag.y > height * 0.5
                             onDropped: (drop) => {
                                 const dragged = Number(drop.mimeData.tabId || 0)
                                 if (dragged > 0 && dragged !== tabId) {
-                                    browser.moveTabBefore(dragged, tabId)
+                                    if (dropAfter) {
+                                        browser.moveTabAfter(dragged, tabId)
+                                    } else {
+                                        browser.moveTabBefore(dragged, tabId)
+                                    }
                                 }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            height: 2
+                            y: dropAfter ? (parent.height - height) : 0
+                            color: theme.accentColor
+                            opacity: reorderDrop.containsDrag ? 0.85 : 0.0
+                            visible: opacity > 0
+                            z: 10
+
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+
+                        Timer {
+                            interval: 16
+                            repeat: true
+                            running: tabDrag.active
+                            onTriggered: {
+                                const view = ListView.view
+                                if (!view || view.contentHeight <= view.height) {
+                                    return
+                                }
+                                const pos = mapToItem(view, tabDrag.centroid.position.x, tabDrag.centroid.position.y)
+                                const edge = 28
+                                const speed = 14
+                                let dir = 0
+                                if (pos.y < edge) {
+                                    dir = -1
+                                } else if (pos.y > view.height - edge) {
+                                    dir = 1
+                                }
+                                if (dir === 0) {
+                                    return
+                                }
+                                view.contentY = Math.max(0, Math.min(view.contentHeight - view.height, view.contentY + dir * speed))
                             }
                         }
 
                         contentItem: RowLayout {
                             spacing: 6
+                            Item {
+                                width: 18
+                                height: 18
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 4
+                                    color: Qt.rgba(0, 0, 0, 0.08)
+                                    visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                        font.pixelSize: 10
+                                        opacity: 0.6
+                                    }
+                                }
+
+                                Image {
+                                    anchors.fill: parent
+                                    source: faviconUrl
+                                    asynchronous: true
+                                    cache: true
+                                    fillMode: Image.PreserveAspectFit
+                                    visible: faviconUrl && faviconUrl.toString().length > 0
+                                }
+                            }
                             TextField {
                                 id: renameField
                                 Layout.fillWidth: true
-                                visible: renaming
+                                visible: renaming && !root.sidebarIconOnly
                                 text: title
                                 selectByMouse: true
                                 onAccepted: finishRename()
@@ -1103,18 +4060,96 @@ ApplicationWindow {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: !renaming
+                                visible: !renaming && !root.sidebarIconOnly
                                 text: title
                                 elide: Text.ElideRight
                             }
+                            Text {
+                                id: loadingIcon
+                                text: "⟳"
+                                Layout.preferredWidth: 18
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: !root.sidebarIconOnly
+                                opacity: isLoading ? 0.85 : 0.0
+
+                                NumberAnimation on rotation {
+                                    from: 0
+                                    to: 360
+                                    duration: 900
+                                    loops: Animation.Infinite
+                                    running: isLoading && !browser.settings.reduceMotion
+                                }
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                            Text {
+                                id: audioIcon
+                                text: isMuted ? "🔇" : "🔊"
+                                Layout.preferredWidth: 18
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: !root.sidebarIconOnly
+                                opacity: isAudioPlaying ? 0.85 : 0.0
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                            ToolButton {
+                                id: moreButton
+                                text: "⋯"
+                                visible: !root.sidebarIconOnly
+                                opacity: showActions ? 1.0 : 0.0
+                                enabled: showActions
+                                onClicked: {
+                                    root.prepareContextMenuSelection(tabId)
+                                    popupManager.openAtItem(tabContextMenuComponent, moreButton, sidebarPane)
+                                }
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
                             ToolButton {
                                 text: isEssential ? "\u2605" : "\u2606"
+                                visible: !root.sidebarIconOnly
+                                opacity: showActions ? 1.0 : 0.0
+                                enabled: showActions
                                 onClicked: commands.invoke("toggle-essential", { tabId: tabId })
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
                             }
                             ToolButton {
                                 text: "×"
+                                visible: !root.sidebarIconOnly
+                                opacity: showActions ? 1.0 : 0.0
+                                enabled: showActions
                                 onClicked: {
                                     commands.invoke("close-tab", { tabId: tabId })
+                                }
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
                                 }
                             }
                         }
@@ -1123,7 +4158,7 @@ ApplicationWindow {
 
                 NotificationsStack {
                     Layout.fillWidth: true
-                    notifications: notifications
+                    notifications: root.notificationsModel
                 }
 
                 MediaControls {
@@ -1133,8 +4168,9 @@ ApplicationWindow {
 
                 SidebarFooter {
                     Layout.fillWidth: true
-                    workspaces: browser.workspaces
-                    settings: browser.settings
+                    browser: root.browserModel
+                    workspaces: root.browserModel.workspaces
+                    settings: root.browserModel.settings
                     popupHost: popupManager
                 }
             }
@@ -1160,6 +4196,8 @@ ApplicationWindow {
                     startWidth = browser.settings.sidebarWidth
                 }
 
+                onDoubleClicked: browser.settings.sidebarWidth = 260
+
                 onPositionChanged: (mouse) => {
                     if (!pressed) {
                         return
@@ -1174,24 +4212,350 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            property int splitPos: Math.round(width * 0.5)
             readonly property int handleWidth: 4
-
-            onWidthChanged: {
-                splitPos = Math.max(200, Math.min(width - 200, splitPos))
+            readonly property int splitMinPx: 200
+            readonly property int splitPos: {
+                const w = width
+                if (w <= 0) {
+                    return 0
+                }
+                const minPos = Math.min(splitMinPx, Math.round(w * 0.5))
+                const maxPos = Math.max(minPos, w - minPos)
+                const desired = Math.round(w * splitView.splitRatio)
+                return Math.max(minPos, Math.min(maxPos, desired))
+            }
+            readonly property int gridSplitPosX: {
+                const gap = handleWidth
+                const available = Math.max(0, width - gap)
+                if (available <= 0) {
+                    return 0
+                }
+                const minPos = Math.min(splitMinPx, Math.round(available * 0.5))
+                const maxPos = Math.max(minPos, available - minPos)
+                const desired = Math.round(available * splitView.gridSplitRatioX)
+                return Math.max(minPos, Math.min(maxPos, desired))
+            }
+            readonly property int gridSplitPosY: {
+                const gap = handleWidth
+                const available = Math.max(0, height - gap)
+                if (available <= 0) {
+                    return 0
+                }
+                const minPos = Math.min(splitMinPx, Math.round(available * 0.5))
+                const maxPos = Math.max(minPos, available - minPos)
+                const desired = Math.round(available * splitView.gridSplitRatioY)
+                return Math.max(minPos, Math.min(maxPos, desired))
             }
 
-            WebView2View {
-                id: web
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.left: parent.left
-                width: splitView.enabled ? contentHost.splitPos : contentHost.width
+            function paneRect(paneIndex) {
+                if (!splitView.enabled) {
+                    return { x: 0, y: 0, width: contentHost.width, height: contentHost.height }
+                }
+
+                const count = Number(splitView.paneCount || 2)
+                if (count <= 2) {
+                    const leftW = Math.max(0, contentHost.splitPos)
+                    const rightX = contentHost.splitPos + contentHost.handleWidth
+                    const rightW = Math.max(0, contentHost.width - contentHost.splitPos - contentHost.handleWidth)
+                    if (paneIndex === 0) {
+                        return { x: 0, y: 0, width: leftW, height: contentHost.height }
+                    }
+                    if (paneIndex === 1) {
+                        return { x: rightX, y: 0, width: rightW, height: contentHost.height }
+                    }
+                    return { x: 0, y: 0, width: 0, height: 0 }
+                }
+
+                const gap = contentHost.handleWidth
+                const availableW = Math.max(0, contentHost.width - gap)
+                const availableH = Math.max(0, contentHost.height - gap)
+
+                const leftW = Math.max(0, Math.min(availableW, contentHost.gridSplitPosX))
+                const rightW = Math.max(0, availableW - leftW)
+                const topH = Math.max(0, Math.min(availableH, contentHost.gridSplitPosY))
+                const bottomH = Math.max(0, availableH - topH)
+                const rightX = leftW + gap
+                const bottomY = topH + gap
+
+                if (paneIndex === 0) {
+                    return { x: 0, y: 0, width: leftW, height: topH }
+                }
+                if (paneIndex === 1) {
+                    return { x: rightX, y: 0, width: rightW, height: topH }
+                }
+                if (paneIndex === 2) {
+                    return { x: 0, y: bottomY, width: leftW, height: bottomH }
+                }
+                if (paneIndex === 3) {
+                    return { x: rightX, y: bottomY, width: rightW, height: bottomH }
+                }
+                return { x: 0, y: 0, width: 0, height: 0 }
+            }
+
+            Component {
+                id: tabWebViewComponent
+
+                WebView2View {
+                    id: tabWeb
+                    required property int tabId
+
+                    readonly property int paneIndex: splitView.enabled
+                                                          ? splitView.paneIndexForTabId(tabId)
+                                                          : (tabId === root.tabIdForActiveIndex() ? 0 : -1)
+                    readonly property var paneRect: paneIndex >= 0 ? contentHost.paneRect(paneIndex) : ({ x: 0, y: 0, width: 0, height: 0 })
+
+                    visible: paneIndex >= 0
+                    x: paneRect.x
+                    y: paneRect.y
+                    width: paneRect.width
+                    height: paneRect.height
+
+                    Component.onCompleted: {
+                        if (root.modsBootstrapScript && root.modsBootstrapScript.length > 0) {
+                            addScriptOnDocumentCreated(root.modsBootstrapScript)
+                        }
+                        if (root.glanceScript && root.glanceScript.length > 0) {
+                            addScriptOnDocumentCreated(root.glanceScript)
+                        }
+                        const url = root.urlForTabId(tabId)
+                        if (url && url.toString().length > 0) {
+                            navigate(url)
+                        }
+                    }
+
+                    onTitleChanged: {
+                        if (tabId > 0) {
+                            browser.setTabTitleById(tabId, title)
+                        }
+                    }
+
+                    onCurrentUrlChanged: {
+                        if (tabId > 0) {
+                            browser.setTabUrlById(tabId, currentUrl)
+                        }
+                        if (tabId === root.focusedTabId) {
+                            root.syncAddressFieldFromFocused()
+                        }
+                    }
+
+                    onIsLoadingChanged: {
+                        if (tabId > 0) {
+                            browser.setTabIsLoadingById(tabId, isLoading)
+                        }
+                    }
+
+                    onDocumentPlayingAudioChanged: {
+                        if (tabId > 0) {
+                            browser.setTabAudioStateById(tabId, documentPlayingAudio, muted)
+                        }
+                    }
+
+                    onMutedChanged: {
+                        if (tabId > 0) {
+                            browser.setTabAudioStateById(tabId, documentPlayingAudio, muted)
+                        }
+                    }
+
+                    onFaviconUrlChanged: {
+                        if (tabId > 0) {
+                            browser.setTabFaviconUrlById(tabId, faviconUrl)
+                        }
+                    }
+
+                    onFocusReceived: {
+                        if (!splitView.enabled) {
+                            splitView.focusedPane = 0
+                            return
+                        }
+                        if (paneIndex >= 0) {
+                            splitView.focusedPane = paneIndex
+                        }
+                    }
+
+                    onContextMenuRequested: (info) => root.openWebContextMenu(tabId, info)
+
+                    onPermissionRequested: (requestId, origin, kind, userInitiated) => {
+                        root.showPermissionDoorhanger(tabId, requestId, origin, kind, userInitiated)
+                    }
+
+                    onWebMessageReceived: (json) => root.handleWebMessage(tabId, json, tabWeb)
+                    onDownloadStarted: (uri, resultFilePath) => root.handleDownloadStarted(uri, resultFilePath)
+                    onDownloadFinished: (uri, resultFilePath, success) => root.handleDownloadFinished(uri, resultFilePath, success)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: !tabWeb.initialized && tabWeb.initError && tabWeb.initError.length > 0
+                            color: Qt.rgba(1, 1, 1, 0.96)
+                            border.color: Qt.rgba(0, 0, 0, 0.08)
+                            border.width: 1
+                            radius: theme.cornerRadius
+
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                width: Math.min(parent.width - 48, 560)
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Web engine unavailable"
+                                    font.bold: true
+                                    wrapMode: Text.Wrap
+                                }
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: tabWeb.initError
+                                    wrapMode: Text.Wrap
+                                    opacity: 0.85
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: theme.spacing
+
+                                    Button {
+                                        text: "Install WebView2 Runtime"
+                                        onClicked: Qt.openUrlExternally("https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+                                    }
+
+                                    Button {
+                                        text: "Retry"
+                                        onClicked: tabWeb.retryInitialize()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+            Repeater {
+                model: splitView.enabled ? (splitView.paneCount > 2 ? 4 : splitView.paneCount) : 0
+
+                delegate: Rectangle {
+                    readonly property var rect: contentHost.paneRect(index)
+                    readonly property int tabId: splitView.tabIdForPane(index)
+                    readonly property bool emptyPane: tabId <= 0
+
+                    x: rect.x
+                    y: rect.y
+                    width: rect.width
+                    height: rect.height
+                    color: "transparent"
+                    border.width: splitView.focusedPane === index ? 2 : 1
+                    border.color: emptyPane ? Qt.rgba(0, 0, 0, 0.10) : (splitView.focusedPane === index ? theme.accentColor : Qt.rgba(0, 0, 0, 0.08))
+                    z: 5
+
+                    Label {
+                        anchors.centerIn: parent
+                        text: "Empty pane\nDrop a tab here"
+                        horizontalAlignment: Text.AlignHCenter
+                        visible: emptyPane
+                        opacity: 0.6
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: emptyPane
+                        hoverEnabled: enabled
+                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: {
+                            const idx = browser.newTab(QUrl("about:blank"))
+                            if (idx >= 0) {
+                                splitView.paneCount = Math.max(splitView.paneCount, index + 1)
+                                splitView.setTabIdForPane(index, browser.tabs.tabIdAt(idx))
+                                splitView.focusedPane = index
+                                splitView.enabled = true
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: gridSplitHandleX
+                visible: splitView.enabled && splitView.paneCount > 2
+                x: contentHost.gridSplitPosX
+                y: 0
+                width: contentHost.handleWidth
+                height: contentHost.height
+                color: Qt.rgba(0, 0, 0, (gridSplitHandleXArea.containsMouse || gridSplitHandleXArea.pressed) ? 0.10 : 0.06)
+                z: 6
+
+                MouseArea {
+                    id: gridSplitHandleXArea
+                    anchors.fill: parent
+                    cursorShape: Qt.SplitHCursor
+                    hoverEnabled: true
+                    preventStealing: true
+
+                    property real startSceneX: 0
+                    property int startPos: 0
+
+                    onPressed: (mouse) => {
+                        startSceneX = mouse.sceneX
+                        startPos = contentHost.gridSplitPosX
+                    }
+
+                    onDoubleClicked: splitView.gridSplitRatioX = 0.5
+
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) {
+                            return
+                        }
+                        const available = Math.max(1, contentHost.width - contentHost.handleWidth)
+                        const minPos = Math.min(contentHost.splitMinPx, Math.round(available * 0.5))
+                        const maxPos = Math.max(minPos, available - minPos)
+                        const next = startPos + Math.round(mouse.sceneX - startSceneX)
+                        const clamped = Math.max(minPos, Math.min(maxPos, next))
+                        splitView.gridSplitRatioX = clamped / available
+                    }
+                }
+            }
+
+            Rectangle {
+                id: gridSplitHandleY
+                visible: splitView.enabled && splitView.paneCount > 2
+                x: 0
+                y: contentHost.gridSplitPosY
+                width: contentHost.width
+                height: contentHost.handleWidth
+                color: Qt.rgba(0, 0, 0, (gridSplitHandleYArea.containsMouse || gridSplitHandleYArea.pressed) ? 0.10 : 0.06)
+                z: 6
+
+                MouseArea {
+                    id: gridSplitHandleYArea
+                    anchors.fill: parent
+                    cursorShape: Qt.SplitVCursor
+                    hoverEnabled: true
+                    preventStealing: true
+
+                    property real startSceneY: 0
+                    property int startPos: 0
+
+                    onPressed: (mouse) => {
+                        startSceneY = mouse.sceneY
+                        startPos = contentHost.gridSplitPosY
+                    }
+
+                    onDoubleClicked: splitView.gridSplitRatioY = 0.5
+
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) {
+                            return
+                        }
+                        const available = Math.max(1, contentHost.height - contentHost.handleWidth)
+                        const minPos = Math.min(contentHost.splitMinPx, Math.round(available * 0.5))
+                        const maxPos = Math.max(minPos, available - minPos)
+                        const next = startPos + Math.round(mouse.sceneY - startSceneY)
+                        const clamped = Math.max(minPos, Math.min(maxPos, next))
+                        splitView.gridSplitRatioY = clamped / available
+                    }
+                }
             }
 
             Rectangle {
                 id: splitHandle
-                visible: splitView.enabled
+                visible: splitView.enabled && splitView.paneCount === 2
                 x: contentHost.splitPos
                 width: contentHost.handleWidth
                 anchors.top: parent.top
@@ -1212,23 +4576,24 @@ ApplicationWindow {
                         startPos = contentHost.splitPos
                     }
 
+                    onDoubleClicked: {
+                        splitView.splitRatio = 0.5
+                    }
+
                     onPositionChanged: (mouse) => {
                         if (!pressed) {
                             return
                         }
+                        if (contentHost.width <= 0) {
+                            return
+                        }
+                        const minPos = Math.min(contentHost.splitMinPx, Math.round(contentHost.width * 0.5))
+                        const maxPos = Math.max(minPos, contentHost.width - minPos)
                         const next = startPos + Math.round(mouse.sceneX - startSceneX)
-                        contentHost.splitPos = Math.max(200, Math.min(contentHost.width - 200, next))
+                        const clamped = Math.max(minPos, Math.min(maxPos, next))
+                        splitView.splitRatio = clamped / contentHost.width
                     }
                 }
-            }
-
-            WebView2View {
-                id: webSecondary
-                visible: splitView.enabled
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.left: splitHandle.right
-                anchors.right: parent.right
             }
 
             Item {
@@ -1246,9 +4611,22 @@ ApplicationWindow {
 
                     onPositionChanged: (drag) => {
                         const threshold = 80
-                        if (drag.x < threshold) {
+                        const left = drag.x < threshold
+                        const right = drag.x > width - threshold
+                        const top = drag.y < threshold
+                        const bottom = drag.y > height - threshold
+
+                        if (left && top) {
+                            splitDropzone.zone = "top-left"
+                        } else if (right && top) {
+                            splitDropzone.zone = "top-right"
+                        } else if (left && bottom) {
+                            splitDropzone.zone = "bottom-left"
+                        } else if (right && bottom) {
+                            splitDropzone.zone = "bottom-right"
+                        } else if (left) {
                             splitDropzone.zone = "left"
-                        } else if (drag.x > width - threshold) {
+                        } else if (right) {
                             splitDropzone.zone = "right"
                         } else {
                             splitDropzone.zone = ""
@@ -1264,12 +4642,46 @@ ApplicationWindow {
                             return
                         }
 
-                        if (splitDropzone.zone === "left") {
+                        const current = root.tabIdForActiveIndex()
+                        const zone = splitDropzone.zone
+
+                        if (!splitView.enabled) {
+                            if (zone === "bottom-right") {
+                                splitView.paneCount = 4
+                                splitView.setTabIdForPane(0, current)
+                                splitView.setTabIdForPane(3, tabId)
+                                splitView.focusedPane = 3
+                            } else if (zone === "bottom-left") {
+                                splitView.paneCount = 3
+                                splitView.setTabIdForPane(0, current)
+                                splitView.setTabIdForPane(2, tabId)
+                                splitView.focusedPane = 2
+                            } else if (zone === "right" || zone === "top-right") {
+                                splitView.paneCount = 2
+                                splitView.setTabIdForPane(0, current)
+                                splitView.setTabIdForPane(1, tabId)
+                                splitView.focusedPane = 1
+                            } else {
+                                splitView.paneCount = 2
+                                splitView.setTabIdForPane(0, tabId)
+                                splitView.setTabIdForPane(1, current)
+                                splitView.focusedPane = 0
+                            }
                             splitView.enabled = true
-                            splitView.primaryTabId = tabId
-                        } else if (splitDropzone.zone === "right") {
-                            splitView.enabled = true
-                            splitView.secondaryTabId = tabId
+                        } else {
+                            if (zone === "left" || zone === "top-left") {
+                                splitView.setTabIdForPane(0, tabId)
+                                splitView.focusedPane = 0
+                            } else if (zone === "right" || zone === "top-right") {
+                                splitView.setTabIdForPane(1, tabId)
+                                splitView.focusedPane = 1
+                            } else if (zone === "bottom-left") {
+                                splitView.setTabIdForPane(2, tabId)
+                                splitView.focusedPane = 2
+                            } else if (zone === "bottom-right") {
+                                splitView.setTabIdForPane(3, tabId)
+                                splitView.focusedPane = 3
+                            }
                         }
 
                         splitDropzone.zone = ""
@@ -1281,7 +4693,7 @@ ApplicationWindow {
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: 80
-                    color: Qt.rgba(0.2, 0.5, 1.0, splitDropzone.zone === "left" ? 0.18 : 0.08)
+                    color: Qt.rgba(0.2, 0.5, 1.0, (splitDropzone.zone === "left" || splitDropzone.zone.endsWith("left")) ? 0.18 : 0.08)
                     visible: dropArea.containsDrag
                 }
 
@@ -1290,7 +4702,25 @@ ApplicationWindow {
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: 80
-                    color: Qt.rgba(0.2, 0.5, 1.0, splitDropzone.zone === "right" ? 0.18 : 0.08)
+                    color: Qt.rgba(0.2, 0.5, 1.0, (splitDropzone.zone === "right" || splitDropzone.zone.endsWith("right")) ? 0.18 : 0.08)
+                    visible: dropArea.containsDrag
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 80
+                    color: Qt.rgba(0.2, 0.5, 1.0, splitDropzone.zone.startsWith("top") ? 0.18 : 0.08)
+                    visible: dropArea.containsDrag
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 80
+                    color: Qt.rgba(0.2, 0.5, 1.0, splitDropzone.zone.startsWith("bottom") ? 0.18 : 0.08)
                     visible: dropArea.containsDrag
                 }
             }
@@ -1301,8 +4731,52 @@ ApplicationWindow {
         id: overlayHost
     }
 
+    Connections {
+        target: overlayHost
+
+        function onClosed() {
+            if (root.overlayHostContext === "glance") {
+                root.glanceUrl = ""
+            } else if (root.overlayHostContext === "onboarding") {
+                browser.settings.onboardingSeen = true
+            }
+
+            root.overlayHostContext = ""
+        }
+    }
+
     PopupManager {
         id: popupManager
+    }
+
+    Connections {
+        target: popupManager
+
+        function onClosed() {
+            if (root.popupManagerContext === "web-context-menu") {
+                root.webContextMenuItems = []
+                root.webContextMenuTabId = 0
+                root.webContextMenuInfo = ({})
+            } else if (root.popupManagerContext === "permission-doorhanger") {
+                const view = tabViews.byId[root.pendingPermissionTabId]
+                const reqId = root.pendingPermissionRequestId
+                root.clearPendingPermission()
+                if (view && reqId > 0) {
+                    view.respondToPermissionRequest(reqId, 0, false)
+                }
+            } else if (root.popupManagerContext === "omnibox") {
+                omniboxModel.clear()
+            } else if (root.popupManagerContext === "extensions-panel") {
+                root.extensionsPanelSearch = ""
+            } else if (root.popupManagerContext === "extension-popup") {
+                root.extensionPopupExtensionId = ""
+                root.extensionPopupName = ""
+                root.extensionPopupUrl = ""
+                root.extensionPopupOptionsUrl = ""
+            }
+
+            root.popupManagerContext = ""
+        }
     }
 
     ToastHost { }
@@ -1310,63 +4784,55 @@ ApplicationWindow {
     Shortcuts { }
 
     Connections {
-        target: web
+        target: root.modsModel
 
-        function onTitleChanged() {
-            const tabId = splitView.enabled ? splitView.primaryTabId : tabIdForActiveIndex()
-            if (tabId > 0) {
-                browser.setTabTitleById(tabId, web.title)
-            }
-        }
-
-        function onCurrentUrlChanged() {
-            const tabId = splitView.enabled ? splitView.primaryTabId : tabIdForActiveIndex()
-            if (tabId > 0) {
-                browser.setTabUrlById(tabId, web.currentUrl)
-            }
-            if (!addressField.activeFocus) {
-                addressField.text = web.currentUrl.toString()
-            }
-        }
-
-        function onWebMessageReceived(json) {
-            let msg = null
-            try {
-                msg = JSON.parse(json)
-            } catch (e) {
-                return
-            }
-
-            if (msg && msg.type === "glance" && msg.href) {
-                root.glanceUrl = msg.href
-                overlayHost.show(glanceOverlayComponent)
-            }
-        }
-
-        function onDownloadStarted(uri, resultFilePath) {
-            toast.showToast("Download started")
-            downloads.addStarted(uri, resultFilePath)
-        }
-
-        function onDownloadFinished(uri, resultFilePath, success) {
-            toast.showToast(success ? "Download finished" : "Download failed")
-            downloads.markFinished(uri, resultFilePath, success)
+        function onCombinedCssChanged() {
+            root.pushModsCss(null)
         }
     }
 
     Connections {
-        target: webSecondary
+        target: browser
 
-        function onTitleChanged() {
-            if (splitView.enabled && splitView.secondaryTabId > 0) {
-                browser.setTabTitleById(splitView.secondaryTabId, webSecondary.title)
-            }
+        function onTabsChanged() {
+            Qt.callLater(syncTabViews)
         }
+    }
 
-        function onCurrentUrlChanged() {
-            if (splitView.enabled && splitView.secondaryTabId > 0) {
-                browser.setTabUrlById(splitView.secondaryTabId, webSecondary.currentUrl)
+    Connections {
+        target: browser.tabs
+
+        function onRowsInserted() { Qt.callLater(syncTabViews) }
+        function onRowsRemoved() { Qt.callLater(syncTabViews) }
+        function onRowsMoved() { Qt.callLater(syncTabViews) }
+        function onModelReset() { Qt.callLater(syncTabViews) }
+
+        function onDataChanged(topLeft, bottomRight, roles) {
+            if (!browser.tabs) {
+                return
             }
+
+            if (roles && roles.length > 0 && roles.indexOf(TabModel.UrlRole) < 0) {
+                return
+            }
+
+            const firstRow = topLeft ? topLeft.row : 0
+            const lastRow = bottomRight ? bottomRight.row : browser.tabs.count() - 1
+
+            for (let row = firstRow; row <= lastRow; row++) {
+                const tabId = browser.tabs.tabIdAt(row)
+                const view = tabViews.byId[tabId]
+                if (!view) {
+                    continue
+                }
+
+                const url = browser.tabs.urlAt(row)
+                if (url && url.toString() !== view.currentUrl.toString()) {
+                    view.navigate(url)
+                }
+            }
+
+            syncAddressFieldFromFocused()
         }
     }
 
@@ -1380,31 +4846,76 @@ ApplicationWindow {
                 return
             }
             if (id === "nav-back") {
-                const tabId = tabIdForActiveIndex()
-                if (browser.handleBackRequested(tabId, web.canGoBack)) {
+                const view = root.focusedView
+                const tabId = root.focusedTabId
+                if (!view) {
+                    toast.showToast("No active tab")
                     return
                 }
-                if (!web.canGoBack) {
+                if (browser.handleBackRequested(tabId, view.canGoBack)) {
+                    return
+                }
+                if (!view.canGoBack) {
                     toast.showToast("No history")
                     return
                 }
-                web.goBack()
+                view.goBack()
                 return
             }
             if (id === "nav-forward") {
-                web.goForward()
+                if (root.focusedView) {
+                    root.focusedView.goForward()
+                }
                 return
             }
             if (id === "nav-reload") {
-                web.reload()
+                if (root.focusedView) {
+                    root.focusedView.reload()
+                }
                 return
             }
             if (id === "navigate") {
-                web.navigate(args.url)
+                if (root.focusedView) {
+                    root.focusedView.navigate(args.url)
+                }
                 return
             }
             if (id === "open-devtools") {
-                web.openDevTools()
+                if (root.focusedView) {
+                    root.focusedView.openDevTools()
+                }
+                return
+            }
+            if (id === "open-downloads") {
+                popupManager.openAtItem(downloadsPanelComponent, downloadsButton)
+                return
+            }
+            if (id === "open-mods") {
+                root.openOverlay(modsDialogComponent, "mods")
+                return
+            }
+            if (id === "open-extensions") {
+                root.openOverlay(extensionsDialogComponent, "extensions")
+                return
+            }
+            if (id === "open-latest-download-file") {
+                downloads.openLatestFinishedFile()
+                return
+            }
+            if (id === "open-latest-download-folder") {
+                downloads.openLatestFinishedFolder()
+                return
+            }
+            if (id === "focus-split-primary") {
+                if (splitView.enabled) {
+                    splitView.focusedPane = 0
+                }
+                return
+            }
+            if (id === "focus-split-secondary") {
+                if (splitView.enabled) {
+                    splitView.focusedPane = 1
+                }
                 return
             }
             if (id === "theme-update") {
@@ -1416,44 +4927,69 @@ ApplicationWindow {
         }
     }
 
-    ThemesDialog {
-        id: themesDialog
-        parent: root.contentItem
-        themes: themes
-        settings: browser.settings
+    Component {
+        id: themesDialogComponent
+
+        ThemesDialog {
+            themes: root.themesModel
+            settings: root.browserModel.settings
+            onCloseRequested: overlayHost.hide()
+        }
     }
 
-    DownloadsDialog {
-        id: downloadsDialog
-        parent: root.contentItem
-        downloads: downloads
+    Component {
+        id: downloadsDialogComponent
+
+        DownloadsDialog {
+            downloads: root.downloadsModel
+            onCloseRequested: overlayHost.hide()
+        }
     }
 
-    OnboardingDialog {
-        id: onboardingDialog
-        parent: root.contentItem
-        settings: browser.settings
+    Component {
+        id: modsDialogComponent
+
+        ModsDialog {
+            mods: root.modsModel
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: extensionsDialogComponent
+
+        ExtensionsDialog {
+            extensions: extensions
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: onboardingDialogComponent
+
+        OnboardingDialog {
+            settings: root.browserModel.settings
+            onAccepted: overlayHost.hide()
+            onRejected: overlayHost.hide()
+            onCloseRequested: overlayHost.hide()
+        }
     }
 
     function syncSplitViews() {
         if (!splitView.enabled) {
+            splitView.focusedPane = 0
+            syncAddressFieldFromFocused()
             return
         }
 
-        if (splitView.primaryTabId > 0) {
-            browser.activateTabById(splitView.primaryTabId)
-            navigateViewToTabId(web, splitView.primaryTabId)
+        const tabId = splitView.tabIdForPane(splitView.focusedPane)
+        if (tabId > 0) {
+            browser.activateTabById(tabId)
+        } else {
+            splitView.focusedPane = 0
         }
 
-        if (splitView.secondaryTabId > 0) {
-            navigateViewToTabId(webSecondary, splitView.secondaryTabId)
-        }
-    }
-
-    Connections {
-        target: splitView
-        onEnabledChanged: syncSplitViews()
-        onTabsChanged: syncSplitViews()
+        syncAddressFieldFromFocused()
     }
 
     Connections {
@@ -1465,10 +5001,10 @@ ApplicationWindow {
                 return
             }
             const tabId = browser.tabs.tabIdAt(idx)
-            if (splitView.enabled && splitView.primaryTabId !== tabId) {
-                splitView.primaryTabId = tabId
+            if (splitView.enabled) {
+                splitView.setTabIdForPane(splitView.focusedPane, tabId)
             }
-            navigateViewToTabId(web, tabId)
+            syncAddressFieldFromFocused()
         }
     }
 }

@@ -7,11 +7,16 @@
     <file>qml/components/PopupManager.qml</file>
     <file>qml/components/SidebarFooter.qml</file>
     <file>qml/components/NotificationsStack.qml</file>
+    <file>qml/components/ContextMenu.qml</file>
     <file>qml/components/ThemesDialog.qml</file>
+    <file>qml/components/ModsDialog.qml</file>
+    <file>qml/components/ExtensionsDialog.qml</file>
     <file>qml/components/DownloadsDialog.qml</file>
     <file>qml/components/MediaControls.qml</file>
     <file>qml/components/EmojiPicker.qml</file>
     <file>qml/components/OnboardingDialog.qml</file>
+    <file>qml/components/PermissionDoorhanger.qml</file>
+    <file>qml/components/SitePermissionsPanel.qml</file>
     <file>qml/components/ToastHost.qml</file>
   </qresource>
 </RCC>

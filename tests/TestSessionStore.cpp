@@ -33,11 +33,16 @@ private slots:
       QCOMPARE(ws0, 0);
       QCOMPARE(ws1, 1);
 
+      browser.workspaces()->setSidebarWidthAt(ws0, 180);
+      browser.workspaces()->setSidebarExpandedAt(ws0, true);
+      browser.workspaces()->setSidebarWidthAt(ws1, 320);
+      browser.workspaces()->setSidebarExpandedAt(ws1, false);
+
       // Workspace 0
       {
         TabGroupModel* groups = browser.workspaces()->groupsForIndex(ws0);
         QVERIFY(groups);
-        const int groupId = groups->addGroupWithId(10, "Group A", true);
+        const int groupId = groups->addGroupWithId(10, "Group A", true, QColor("#abcdef"));
         QCOMPARE(groupId, 10);
 
         TabModel* tabs = browser.workspaces()->tabsForIndex(ws0);
@@ -48,6 +53,8 @@ private slots:
         tabs->setGroupIdAt(t0, groupId);
 
         const int t1 = tabs->addTabWithId(101, QUrl("https://b.example"), "B", false);
+        tabs->addTabWithId(102, QUrl("https://d.example"), "D", false);
+        tabs->addTabWithId(103, QUrl("https://e.example"), "E", false);
         tabs->setActiveIndex(t1);
       }
 
@@ -62,9 +69,16 @@ private slots:
       browser.workspaces()->setActiveIndex(ws0);
       QCOMPARE(browser.workspaces()->activeWorkspaceId(), 1);
 
-      split.setPrimaryTabId(100);
-      split.setSecondaryTabId(101);
+      split.setPaneCount(4);
+      split.setTabIdForPane(0, 100);
+      split.setTabIdForPane(1, 101);
+      split.setTabIdForPane(2, 102);
+      split.setTabIdForPane(3, 103);
+      split.setSplitRatio(0.63);
+      split.setGridSplitRatioX(0.41);
+      split.setGridSplitRatioY(0.72);
       split.setEnabled(true);
+      split.setFocusedPane(2);
 
       QString error;
       QVERIFY(store.saveNow(&error));
@@ -87,6 +101,10 @@ private slots:
       QCOMPARE(browser.workspaces()->accentColorAt(0), QColor("#123456"));
       QCOMPARE(browser.workspaces()->accentColorAt(1), QColor("#654321"));
       QCOMPARE(browser.workspaces()->activeWorkspaceId(), 1);
+      QCOMPARE(browser.workspaces()->sidebarWidthAt(0), 180);
+      QCOMPARE(browser.workspaces()->sidebarExpandedAt(0), true);
+      QCOMPARE(browser.workspaces()->sidebarWidthAt(1), 320);
+      QCOMPARE(browser.workspaces()->sidebarExpandedAt(1), false);
 
       TabGroupModel* groups = browser.workspaces()->groupsForIndex(0);
       QVERIFY(groups);
@@ -94,21 +112,37 @@ private slots:
       QCOMPARE(groups->groupIdAt(0), 10);
       QCOMPARE(groups->nameAt(0), QStringLiteral("Group A"));
       QCOMPARE(groups->collapsedAt(0), true);
+      QCOMPARE(groups->colorAt(0), QColor("#abcdef"));
 
       TabModel* tabs = browser.workspaces()->tabsForIndex(0);
       QVERIFY(tabs);
-      QCOMPARE(tabs->count(), 2);
+      QCOMPARE(tabs->count(), 4);
       QCOMPARE(tabs->tabIdAt(0), 100);
       QCOMPARE(tabs->urlAt(0), QUrl("https://a.example"));
       QCOMPARE(tabs->pageTitleAt(0), QStringLiteral("A"));
       QCOMPARE(tabs->customTitleAt(0), QStringLiteral("Custom A"));
       QCOMPARE(tabs->isEssentialAt(0), true);
       QCOMPARE(tabs->groupIdAt(0), 10);
+      QCOMPARE(tabs->tabIdAt(2), 102);
+      QCOMPARE(tabs->urlAt(2), QUrl("https://d.example"));
+      QCOMPARE(tabs->pageTitleAt(2), QStringLiteral("D"));
+      QCOMPARE(tabs->tabIdAt(3), 103);
+      QCOMPARE(tabs->urlAt(3), QUrl("https://e.example"));
+      QCOMPARE(tabs->pageTitleAt(3), QStringLiteral("E"));
       QCOMPARE(tabs->tabIdAt(tabs->activeIndex()), 101);
 
       QVERIFY(split.enabled());
+      QCOMPARE(split.paneCount(), 4);
       QCOMPARE(split.primaryTabId(), 100);
       QCOMPARE(split.secondaryTabId(), 101);
+      QCOMPARE(split.tabIdForPane(0), 100);
+      QCOMPARE(split.tabIdForPane(1), 101);
+      QCOMPARE(split.tabIdForPane(2), 102);
+      QCOMPARE(split.tabIdForPane(3), 103);
+      QCOMPARE(split.focusedPane(), 2);
+      QVERIFY(qAbs(split.splitRatio() - 0.63) < 0.0001);
+      QVERIFY(qAbs(split.gridSplitRatioX() - 0.41) < 0.0001);
+      QVERIFY(qAbs(split.gridSplitRatioY() - 0.72) < 0.0001);
     }
   }
 };
@@ -116,4 +150,3 @@ private slots:
 QTEST_GUILESS_MAIN(TestSessionStore)
 
 #include "TestSessionStore.moc"
-

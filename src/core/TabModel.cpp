@@ -1,5 +1,7 @@
 #include "TabModel.h"
 
+#include <QDateTime>
+
 TabModel::TabModel(QObject* parent)
   : QAbstractListModel(parent)
 {
@@ -40,6 +42,18 @@ QVariant TabModel::data(const QModelIndex& index, int role) const
       return tab.essential;
     case GroupIdRole:
       return tab.groupId;
+    case FaviconUrlRole:
+      return tab.faviconUrl;
+    case IsLoadingRole:
+      return tab.isLoading;
+    case IsAudioPlayingRole:
+      return tab.isAudioPlaying;
+    case IsMutedRole:
+      return tab.isMuted;
+    case LastActivatedMsRole:
+      return tab.lastActivatedMs;
+    case IsSelectedRole:
+      return m_selectedTabIds.contains(tab.id);
     default:
       return {};
   }
@@ -55,6 +69,12 @@ QHash<int, QByteArray> TabModel::roleNames() const
     {IsActiveRole, "isActive"},
     {IsEssentialRole, "isEssential"},
     {GroupIdRole, "groupId"},
+    {FaviconUrlRole, "faviconUrl"},
+    {IsLoadingRole, "isLoading"},
+    {IsAudioPlayingRole, "isAudioPlaying"},
+    {IsMutedRole, "isMuted"},
+    {LastActivatedMsRole, "lastActivatedMs"},
+    {IsSelectedRole, "isSelected"},
   };
 }
 
@@ -75,14 +95,27 @@ void TabModel::setActiveIndex(int index)
 
   const int oldIndex = m_activeIndex;
   m_activeIndex = index;
+  if (m_activeIndex >= 0 && m_activeIndex < m_tabs.size()) {
+    m_tabs[m_activeIndex].lastActivatedMs = QDateTime::currentMSecsSinceEpoch();
+  }
   emit activeIndexChanged();
 
   if (oldIndex >= 0 && oldIndex < m_tabs.size()) {
     emit dataChanged(this->index(oldIndex), this->index(oldIndex), {IsActiveRole});
   }
   if (m_activeIndex >= 0 && m_activeIndex < m_tabs.size()) {
-    emit dataChanged(this->index(m_activeIndex), this->index(m_activeIndex), {IsActiveRole});
+    emit dataChanged(this->index(m_activeIndex), this->index(m_activeIndex), {IsActiveRole, LastActivatedMsRole});
   }
+}
+
+int TabModel::selectedCount() const
+{
+  return m_selectedTabIds.size();
+}
+
+bool TabModel::hasSelection() const
+{
+  return !m_selectedTabIds.isEmpty();
 }
 
 int TabModel::count() const
@@ -106,6 +139,7 @@ int TabModel::addTabWithId(int tabId, const QUrl& url, const QString& title, boo
   entry.initialUrl = url;
   const QString trimmed = title.trimmed();
   entry.pageTitle = trimmed.isEmpty() ? QStringLiteral("New Tab") : trimmed;
+  entry.lastActivatedMs = makeActive ? QDateTime::currentMSecsSinceEpoch() : 0;
   m_tabs.push_back(entry);
 
   if (entry.id >= m_nextId) {
@@ -123,29 +157,33 @@ int TabModel::addTabWithId(int tabId, const QUrl& url, const QString& title, boo
 
 void TabModel::closeTab(int index)
 {
-  if (index < 0 || index >= m_tabs.size()) {
-    return;
-  }
+  removeTabInternal(index, true);
+}
 
-  beginRemoveRows(QModelIndex(), index, index);
-  m_tabs.removeAt(index);
-  endRemoveRows();
-
-  updateActiveIndexAfterClose(index);
+void TabModel::removeTab(int index)
+{
+  removeTabInternal(index, false);
 }
 
 void TabModel::clear()
 {
-  if (m_tabs.isEmpty() && m_activeIndex == -1 && m_nextId == 1) {
+  if (m_tabs.isEmpty() && m_activeIndex == -1 && m_nextId == 1 && m_selectedTabIds.isEmpty()) {
     return;
   }
 
+  const bool hadSelection = !m_selectedTabIds.isEmpty();
+
   beginResetModel();
   m_tabs.clear();
+  m_closedTabs.clear();
+  m_selectedTabIds.clear();
   m_activeIndex = -1;
   m_nextId = 1;
   endResetModel();
   emit activeIndexChanged();
+  if (hadSelection) {
+    emit selectionChanged();
+  }
 }
 
 void TabModel::moveTab(int fromIndex, int toIndex)
@@ -197,6 +235,121 @@ int TabModel::indexOfTabId(int tabId) const
     }
   }
   return -1;
+}
+
+bool TabModel::isSelectedById(int tabId) const
+{
+  if (tabId <= 0 || indexOfTabId(tabId) < 0) {
+    return false;
+  }
+  return m_selectedTabIds.contains(tabId);
+}
+
+void TabModel::setSelectedById(int tabId, bool selected)
+{
+  if (tabId <= 0) {
+    return;
+  }
+
+  const int row = indexOfTabId(tabId);
+  if (row < 0) {
+    return;
+  }
+
+  const bool has = m_selectedTabIds.contains(tabId);
+  if (has == selected) {
+    return;
+  }
+
+  if (selected) {
+    m_selectedTabIds.insert(tabId);
+  } else {
+    m_selectedTabIds.remove(tabId);
+  }
+
+  emit dataChanged(index(row), index(row), {IsSelectedRole});
+  emit selectionChanged();
+}
+
+void TabModel::toggleSelectedById(int tabId)
+{
+  setSelectedById(tabId, !isSelectedById(tabId));
+}
+
+void TabModel::clearSelection()
+{
+  if (m_selectedTabIds.isEmpty()) {
+    return;
+  }
+
+  m_selectedTabIds.clear();
+  if (!m_tabs.isEmpty()) {
+    emit dataChanged(index(0), index(m_tabs.size() - 1), {IsSelectedRole});
+  }
+  emit selectionChanged();
+}
+
+void TabModel::selectOnlyById(int tabId)
+{
+  if (tabId <= 0) {
+    return;
+  }
+  if (indexOfTabId(tabId) < 0) {
+    return;
+  }
+
+  if (m_selectedTabIds.size() == 1 && m_selectedTabIds.contains(tabId)) {
+    return;
+  }
+
+  m_selectedTabIds.clear();
+  m_selectedTabIds.insert(tabId);
+
+  if (!m_tabs.isEmpty()) {
+    emit dataChanged(index(0), index(m_tabs.size() - 1), {IsSelectedRole});
+  }
+  emit selectionChanged();
+}
+
+void TabModel::setSelectionByIds(const QVariantList& tabIds, bool clearOthers)
+{
+  QSet<int> next = clearOthers ? QSet<int>() : m_selectedTabIds;
+
+  for (const QVariant& v : tabIds) {
+    bool ok = false;
+    const int tabId = v.toInt(&ok);
+    if (!ok || tabId <= 0) {
+      continue;
+    }
+    if (indexOfTabId(tabId) < 0) {
+      continue;
+    }
+    next.insert(tabId);
+  }
+
+  if (next == m_selectedTabIds) {
+    return;
+  }
+
+  m_selectedTabIds = next;
+  if (!m_tabs.isEmpty()) {
+    emit dataChanged(index(0), index(m_tabs.size() - 1), {IsSelectedRole});
+  }
+  emit selectionChanged();
+}
+
+QVariantList TabModel::selectedTabIds() const
+{
+  QVariantList ids;
+  ids.reserve(m_selectedTabIds.size());
+
+  for (const auto& tab : m_tabs) {
+    if (m_selectedTabIds.contains(tab.id)) {
+      ids.push_back(tab.id);
+    }
+  }
+
+  return ids;
 }
 
 QUrl TabModel::urlAt(int index) const
@@ -291,6 +444,106 @@ void TabModel::setGroupIdAt(int index, int groupId)
   emit dataChanged(this->index(index), this->index(index), {GroupIdRole});
 }
 
+QUrl TabModel::faviconUrlAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return {};
+  }
+  return m_tabs[index].faviconUrl;
+}
+
+void TabModel::setFaviconUrlAt(int index, const QUrl& url)
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  if (tab.faviconUrl == url) {
+    return;
+  }
+
+  tab.faviconUrl = url;
+  emit dataChanged(this->index(index), this->index(index), {FaviconUrlRole});
+}
+
+bool TabModel::isLoadingAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return false;
+  }
+  return m_tabs[index].isLoading;
+}
+
+void TabModel::setLoadingAt(int index, bool loading)
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  if (tab.isLoading == loading) {
+    return;
+  }
+
+  tab.isLoading = loading;
+  emit dataChanged(this->index(index), this->index(index), {IsLoadingRole});
+}
+
+bool TabModel::isAudioPlayingAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return false;
+  }
+  return m_tabs[index].isAudioPlaying;
+}
+
+void TabModel::setAudioPlayingAt(int index, bool playing)
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  if (tab.isAudioPlaying == playing) {
+    return;
+  }
+
+  tab.isAudioPlaying = playing;
+  emit dataChanged(this->index(index), this->index(index), {IsAudioPlayingRole});
+}
+
+bool TabModel::isMutedAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return false;
+  }
+  return m_tabs[index].isMuted;
+}
+
+void TabModel::setMutedAt(int index, bool muted)
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  if (tab.isMuted == muted) {
+    return;
+  }
+
+  tab.isMuted = muted;
+  emit dataChanged(this->index(index), this->index(index), {IsMutedRole});
+}
+
+qint64 TabModel::lastActivatedMsAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return 0;
+  }
+  return m_tabs[index].lastActivatedMs;
+}
+
 void TabModel::setUrlAt(int index, const QUrl& url)
 {
   if (index < 0 || index >= m_tabs.size()) {
@@ -354,6 +607,58 @@ void TabModel::setCustomTitleAt(int index, const QString& title)
 
   tab.customTitle = nextTitle;
   emit dataChanged(this->index(index), this->index(index), {TitleRole, CustomTitleRole});
+}
+
+bool TabModel::canRestoreLastClosedTab() const
+{
+  return !m_closedTabs.isEmpty();
+}
+
+int TabModel::restoreLastClosedTab()
+{
+  if (m_closedTabs.isEmpty()) {
+    return -1;
+  }
+
+  const TabEntry entry = m_closedTabs.takeLast();
+  const int idx = addTabWithId(0, entry.url, entry.pageTitle, true);
+  setInitialUrlAt(idx, entry.initialUrl.isValid() ? entry.initialUrl : entry.url);
+  setCustomTitleAt(idx, entry.customTitle);
+  setEssentialAt(idx, entry.essential);
+  setGroupIdAt(idx, entry.groupId);
+  setFaviconUrlAt(idx, entry.faviconUrl);
+  setLoadingAt(idx, false);
+  setAudioPlayingAt(idx, false);
+  setMutedAt(idx, false);
+  return idx;
+}
+
+void TabModel::removeTabInternal(int index, bool recordClosed)
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  const int removedTabId = m_tabs[index].id;
+  const bool selectionWasChanged = m_selectedTabIds.contains(removedTabId);
+  m_selectedTabIds.remove(removedTabId);
+
+  if (recordClosed) {
+    if (m_closedTabs.size() >= 20) {
+      m_closedTabs.removeFirst();
+    }
+    m_closedTabs.push_back(m_tabs[index]);
+  }
+
+  beginRemoveRows(QModelIndex(), index, index);
+  m_tabs.removeAt(index);
+  endRemoveRows();
+
+  if (selectionWasChanged) {
+    emit selectionChanged();
+  }
+
+  updateActiveIndexAfterClose(index);
 }
 
 void TabModel::updateActiveIndexAfterClose(int closedIndex)

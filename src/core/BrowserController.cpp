@@ -4,7 +4,46 @@ BrowserController::BrowserController(QObject* parent)
   : QObject(parent)
 {
   m_workspaces.addWorkspace("Default");
-  connect(&m_workspaces, &WorkspaceModel::activeIndexChanged, this, [this] {
+  m_lastWorkspaceIndex = m_workspaces.activeIndex();
+
+  auto syncSettingsToWorkspace = [this](int workspaceIndex) {
+    if (workspaceIndex < 0 || workspaceIndex >= m_workspaces.count()) {
+      return;
+    }
+    m_workspaces.setSidebarWidthAt(workspaceIndex, m_settings.sidebarWidth());
+    m_workspaces.setSidebarExpandedAt(workspaceIndex, m_settings.sidebarExpanded());
+  };
+
+  syncSettingsToWorkspace(m_lastWorkspaceIndex);
+
+  connect(&m_settings, &AppSettings::sidebarWidthChanged, this, [this, syncSettingsToWorkspace] {
+    syncSettingsToWorkspace(m_workspaces.activeIndex());
+  });
+  connect(&m_settings, &AppSettings::sidebarExpandedChanged, this, [this, syncSettingsToWorkspace] {
+    syncSettingsToWorkspace(m_workspaces.activeIndex());
+  });
+
+  connect(&m_workspaces, &QAbstractItemModel::rowsInserted, this, [this](const QModelIndex&, int first, int last) {
+    for (int i = first; i <= last; ++i) {
+      m_workspaces.setSidebarWidthAt(i, m_settings.sidebarWidth());
+      m_workspaces.setSidebarExpandedAt(i, m_settings.sidebarExpanded());
+    }
+  });
+
+  connect(&m_workspaces, &WorkspaceModel::activeIndexChanged, this, [this, syncSettingsToWorkspace] {
+    const int nextIndex = m_workspaces.activeIndex();
+
+    if (m_lastWorkspaceIndex != nextIndex) {
+      syncSettingsToWorkspace(m_lastWorkspaceIndex);
+
+      if (nextIndex >= 0 && nextIndex < m_workspaces.count()) {
+        m_settings.setSidebarWidth(m_workspaces.sidebarWidthAt(nextIndex));
+        m_settings.setSidebarExpanded(m_workspaces.sidebarExpandedAt(nextIndex));
+      }
+
+      m_lastWorkspaceIndex = nextIndex;
+    }
+
     emit tabsChanged();
     emit tabGroupsChanged();
   });
@@ -221,6 +260,30 @@ void BrowserController::moveTabBefore(int tabId, int beforeTabId)
   model->moveTab(fromIndex, toIndex);
 }
 
+void BrowserController::moveTabAfter(int tabId, int afterTabId)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  const int fromIndex = model->indexOfTabId(tabId);
+  const int afterIndex = model->indexOfTabId(afterTabId);
+  if (fromIndex < 0 || afterIndex < 0 || fromIndex == afterIndex) {
+    return;
+  }
+
+  if (model->groupIdAt(fromIndex) != model->groupIdAt(afterIndex)) {
+    return;
+  }
+  if (model->isEssentialAt(fromIndex) != model->isEssentialAt(afterIndex)) {
+    return;
+  }
+
+  const int toIndex = fromIndex < afterIndex ? afterIndex : afterIndex + 1;
+  model->moveTab(fromIndex, toIndex);
+}
+
 bool BrowserController::handleBackRequested(int tabId, bool canGoBack)
 {
   if (canGoBack) {
@@ -307,4 +370,121 @@ void BrowserController::setTabUrlById(int tabId, const QUrl& url)
     return;
   }
   model->setUrlAt(index, url);
+}
+
+void BrowserController::setTabIsLoadingById(int tabId, bool loading)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  const int index = model->indexOfTabId(tabId);
+  if (index < 0) {
+    return;
+  }
+  model->setLoadingAt(index, loading);
+}
+
+void BrowserController::setTabAudioStateById(int tabId, bool playing, bool muted)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  const int index = model->indexOfTabId(tabId);
+  if (index < 0) {
+    return;
+  }
+
+  model->setAudioPlayingAt(index, playing);
+  model->setMutedAt(index, muted);
+}
+
+void BrowserController::setTabFaviconUrlById(int tabId, const QUrl& url)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  const int index = model->indexOfTabId(tabId);
+  if (index < 0) {
+    return;
+  }
+  model->setFaviconUrlAt(index, url);
+}
+
+void BrowserController::duplicateTabById(int tabId)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  const int index = model->indexOfTabId(tabId);
+  if (index < 0) {
+    return;
+  }
+
+  const QUrl url = model->urlAt(index);
+  const QUrl initialUrl = model->initialUrlAt(index);
+  const QString pageTitle = model->pageTitleAt(index);
+  const QString customTitle = model->customTitleAt(index);
+
+  const int newIndex = model->addTab(url.isValid() ? url : QUrl("about:blank"));
+  model->setInitialUrlAt(newIndex, initialUrl.isValid() ? initialUrl : url);
+  model->setTitleAt(newIndex, pageTitle);
+  model->setCustomTitleAt(newIndex, customTitle);
+  model->setGroupIdAt(newIndex, model->groupIdAt(index));
+}
+
+bool BrowserController::restoreLastClosedTab()
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return false;
+  }
+
+  if (!model->canRestoreLastClosedTab()) {
+    return false;
+  }
+
+  model->restoreLastClosedTab();
+  return true;
+}
+
+void BrowserController::moveTabToWorkspace(int tabId, int workspaceIndex)
+{
+  if (workspaceIndex < 0 || workspaceIndex >= m_workspaces.count()) {
+    return;
+  }
+
+  TabModel* fromTabs = tabs();
+  TabModel* toTabs = m_workspaces.tabsForIndex(workspaceIndex);
+  if (!fromTabs || !toTabs || fromTabs == toTabs) {
+    return;
+  }
+
+  const int fromIndex = fromTabs->indexOfTabId(tabId);
+  if (fromIndex < 0) {
+    return;
+  }
+
+  const QUrl url = fromTabs->urlAt(fromIndex);
+  const QUrl initialUrl = fromTabs->initialUrlAt(fromIndex);
+  const QString pageTitle = fromTabs->pageTitleAt(fromIndex);
+  const QString customTitle = fromTabs->customTitleAt(fromIndex);
+  const bool essential = fromTabs->isEssentialAt(fromIndex);
+
+  const int toIndex = toTabs->addTab(url.isValid() ? url : QUrl("about:blank"));
+  toTabs->setInitialUrlAt(toIndex, initialUrl.isValid() ? initialUrl : url);
+  toTabs->setTitleAt(toIndex, pageTitle);
+  toTabs->setCustomTitleAt(toIndex, customTitle);
+  toTabs->setEssentialAt(toIndex, essential);
+  toTabs->setGroupIdAt(toIndex, 0);
+  toTabs->setActiveIndex(toIndex);
+
+  fromTabs->removeTab(fromIndex);
 }

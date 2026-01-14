@@ -110,6 +110,21 @@ int ThemeController::spacing() const
   return m_spacing;
 }
 
+int ThemeController::motionFastMs() const
+{
+  return 120;
+}
+
+int ThemeController::motionNormalMs() const
+{
+  return 180;
+}
+
+int ThemeController::motionSlowMs() const
+{
+  return 240;
+}
+
 void ThemeController::refresh()
 {
   const QString themeId = m_settings ? m_settings->themeId() : QStringLiteral("workspace");

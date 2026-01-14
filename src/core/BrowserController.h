@@ -38,6 +38,7 @@ public:
   Q_INVOKABLE void deleteTabGroup(int groupId);
 
   Q_INVOKABLE void moveTabBefore(int tabId, int beforeTabId);
+  Q_INVOKABLE void moveTabAfter(int tabId, int afterTabId);
 
   Q_INVOKABLE bool handleBackRequested(int tabId, bool canGoBack);
 
@@ -46,6 +47,14 @@ public:
 
   Q_INVOKABLE void setTabTitleById(int tabId, const QString& title);
   Q_INVOKABLE void setTabUrlById(int tabId, const QUrl& url);
+  Q_INVOKABLE void setTabIsLoadingById(int tabId, bool loading);
+  Q_INVOKABLE void setTabAudioStateById(int tabId, bool playing, bool muted);
+  Q_INVOKABLE void setTabFaviconUrlById(int tabId, const QUrl& url);
+
+  Q_INVOKABLE void duplicateTabById(int tabId);
+  Q_INVOKABLE bool restoreLastClosedTab();
+
+  Q_INVOKABLE void moveTabToWorkspace(int tabId, int workspaceIndex);
 
 signals:
   void tabsChanged();
@@ -54,4 +63,5 @@ signals:
 private:
   WorkspaceModel m_workspaces;
   AppSettings m_settings;
+  int m_lastWorkspaceIndex = -1;
 };
