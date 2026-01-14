@@ -7,6 +7,8 @@
 
 `run.ps1` auto-deploys the Qt runtime (via `windeployqt`) if the build output is missing Qt DLLs/plugins (checks `platforms\\qwindows*.dll` + QML folders).
 
+If you double-click the `.cmd` launchers and something fails, the window will pause so you can read the error.
+
 ## Direct exe (double-clickable)
 
 1. Build once: `cmake --build build --config Debug`
