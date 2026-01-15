@@ -52,6 +52,8 @@ public:
   Q_INVOKABLE void goBack();
   Q_INVOKABLE void goForward();
   Q_INVOKABLE void openDevTools();
+  Q_INVOKABLE void showPrintUI();
+  Q_INVOKABLE void printToPdf(const QString& filePath);
   Q_INVOKABLE void setMuted(bool muted);
   Q_INVOKABLE void retryInitialize();
 
@@ -71,6 +73,7 @@ signals:
   void faviconUrlChanged();
   void documentPlayingAudioChanged();
   void mutedChanged();
+  void navigationCommitted(bool success);
 
   void webMessageReceived(const QString& json);
   void scriptExecuted(const QString& resultJson);
@@ -81,6 +84,7 @@ signals:
   void contextMenuRequested(const QVariantMap& info);
   void permissionRequested(int requestId, const QString& origin, int kind, bool userInitiated);
   void focusReceived();
+  void printToPdfFinished(const QString& filePath, bool success, const QString& error);
 
 private:
   void handleWindowChanged(QQuickWindow* window);

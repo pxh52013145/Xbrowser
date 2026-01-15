@@ -53,6 +53,11 @@ xbrowser_add_test(xbrowser_test_tabmodel
   TestTabModel.cpp
 )
 
+xbrowser_add_test(xbrowser_test_tabswitcher
+  TestTabSwitcherModel.cpp
+  ../src/core/TabSwitcherModel.cpp
+)
+
 xbrowser_add_test(xbrowser_test_toast
   TestToastController.cpp
 )
@@ -98,4 +103,21 @@ xbrowser_add_test(xbrowser_test_permissions
 
 xbrowser_add_test(xbrowser_test_extensions_store
   TestExtensionsStore.cpp
+)
+
+xbrowser_add_test(xbrowser_test_bookmarks
+  TestBookmarksStore.cpp
+  ../src/core/BookmarksStore.cpp
+  ../src/core/BookmarksFilterModel.cpp
+)
+
+xbrowser_add_test(xbrowser_test_history
+  TestHistoryStore.cpp
+  ../src/core/HistoryStore.cpp
+  ../src/core/HistoryFilterModel.cpp
+)
+
+xbrowser_add_test(xbrowser_test_shortcut_store
+  TestShortcutStore.cpp
+  ../src/core/ShortcutStore.cpp
 )

@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <QClipboard>
+#include <QCommandLineParser>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -13,20 +14,31 @@
 #include <QQmlContext>
 #include <QQmlError>
 #include <QQuickStyle>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTextStream>
 #include <QUrlQuery>
+#include <memory>
 
 #include "../core/AppPaths.h"
 #include "../core/BrowserController.h"
+#include "../core/BookmarksFilterModel.h"
+#include "../core/BookmarksStore.h"
 #include "../core/CommandBus.h"
+#include "../core/DiagnosticsController.h"
 #include "../core/DownloadModel.h"
+#include "../core/HistoryFilterModel.h"
+#include "../core/HistoryStore.h"
 #include "../core/ModsModel.h"
 #include "../core/NotificationCenter.h"
 #include "../core/QuickLinksModel.h"
+#include "../core/ShortcutStore.h"
 #include "../core/SessionStore.h"
 #include "../core/SitePermissionsStore.h"
 #include "../core/SplitViewController.h"
 #include "../core/TabFilterModel.h"
+#include "../core/TabSwitcherModel.h"
 #include "../core/ThemeController.h"
 #include "../core/ThemePackModel.h"
 #include "../core/ToastController.h"
@@ -129,6 +141,58 @@ void ensureQtRuntimePaths()
   setEnv("QT_QPA_PLATFORM_PLUGIN_PATH", platformsPath);
 }
 
+struct LaunchOptions
+{
+  QString dataDir;
+  QString profileId;
+  bool incognito = false;
+};
+
+QString sanitizeProfileId(const QString& rawId)
+{
+  const QString trimmed = rawId.trimmed();
+  if (trimmed.isEmpty()) {
+    return {};
+  }
+
+  QString out;
+  out.reserve(trimmed.size());
+  for (const QChar ch : trimmed) {
+    if (ch.isLetterOrNumber() || ch == QLatin1Char('-') || ch == QLatin1Char('_') || ch == QLatin1Char('.')) {
+      out.append(ch);
+    } else {
+      out.append(QLatin1Char('_'));
+    }
+  }
+
+  out = out.left(64);
+  if (out == QStringLiteral(".") || out == QStringLiteral("..")) {
+    return QStringLiteral("default");
+  }
+  return out;
+}
+
+LaunchOptions parseLaunchOptions(QCoreApplication& app)
+{
+  QCommandLineParser parser;
+  parser.setSingleDashWordOptionMode(QCommandLineParser::ParseAsLongOptions);
+
+  QCommandLineOption dataDirOpt(QStringLiteral("data-dir"), QStringLiteral("Override data directory."), QStringLiteral("dir"));
+  QCommandLineOption profileOpt(QStringLiteral("profile"), QStringLiteral("Use a named profile under AppLocalDataLocation/profiles."), QStringLiteral("id"));
+  QCommandLineOption incognitoOpt(QStringLiteral("incognito"), QStringLiteral("Use a temporary data directory (incognito)."));
+
+  parser.addOption(dataDirOpt);
+  parser.addOption(profileOpt);
+  parser.addOption(incognitoOpt);
+  parser.process(app);
+
+  LaunchOptions opts;
+  opts.dataDir = parser.value(dataDirOpt).trimmed();
+  opts.profileId = sanitizeProfileId(parser.value(profileOpt));
+  opts.incognito = parser.isSet(incognitoOpt);
+  return opts;
+}
+
 void showFatalMessage(const QString& message, const QString& title = QStringLiteral("XBrowser"))
 {
   MessageBoxW(
@@ -193,19 +257,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext&, const QString& ms
 
 QString logFilePath()
 {
-  const QString overrideDir = qEnvironmentVariable("XBROWSER_DATA_DIR");
-  QString baseDir;
-  if (!overrideDir.isEmpty()) {
-    baseDir = overrideDir;
-  } else {
-    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
-    if (!localAppData.isEmpty()) {
-      baseDir = QDir(localAppData).filePath(QStringLiteral("XBrowser/XBrowser"));
-    } else {
-      baseDir = QDir(QDir::tempPath()).filePath(QStringLiteral("XBrowser"));
-    }
-  }
-
+  const QString baseDir = xbrowser::appDataRoot();
   QDir().mkpath(baseDir);
   return QDir(baseDir).filePath(QStringLiteral("xbrowser.log"));
 }
@@ -231,9 +283,33 @@ int main(int argc, char* argv[])
   ensureQtRuntimePaths();
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-  installLogging();
-
   QGuiApplication app(argc, argv);
+
+  std::unique_ptr<QTemporaryDir> incognitoDir;
+  const LaunchOptions launchOptions = parseLaunchOptions(app);
+
+  if (launchOptions.incognito) {
+    incognitoDir = std::make_unique<QTemporaryDir>();
+    if (!incognitoDir->isValid()) {
+      showFatalMessage(QStringLiteral("Failed to create a temporary data directory for incognito mode."));
+      return 1;
+    }
+
+    qputenv("XBROWSER_DATA_DIR", incognitoDir->path().toUtf8());
+    qputenv("XBROWSER_INCOGNITO", "1");
+  } else if (!launchOptions.dataDir.isEmpty()) {
+    const QString dir = QDir(launchOptions.dataDir).absolutePath();
+    QDir().mkpath(dir);
+    qputenv("XBROWSER_DATA_DIR", QDir::toNativeSeparators(dir).toUtf8());
+  } else if (!launchOptions.profileId.isEmpty() && launchOptions.profileId != QStringLiteral("default")) {
+    const QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString profileDir = QDir(baseDir).filePath(QStringLiteral("profiles/%1").arg(launchOptions.profileId));
+    QDir().mkpath(profileDir);
+    qputenv("XBROWSER_DATA_DIR", QDir::toNativeSeparators(QDir(profileDir).absolutePath()).toUtf8());
+    qputenv("XBROWSER_PROFILE", launchOptions.profileId.toUtf8());
+  }
+
+  installLogging();
 
   QQuickStyle::setStyle("Material");
 
@@ -253,12 +329,18 @@ int main(int argc, char* argv[])
     "TabGroupModel",
     "TabGroupModel is exposed via BrowserController.tabGroups");
   qmlRegisterType<TabFilterModel>("XBrowser", 1, 0, "TabFilterModel");
+  qmlRegisterType<TabSwitcherModel>("XBrowser", 1, 0, "TabSwitcherModel");
+  qmlRegisterType<BookmarksFilterModel>("XBrowser", 1, 0, "BookmarksFilterModel");
+  qmlRegisterType<HistoryFilterModel>("XBrowser", 1, 0, "HistoryFilterModel");
 
   BrowserController browser;
   CommandBus commands;
+  ShortcutStore shortcutStore;
   NotificationCenter notifications;
   ToastController toast;
   DownloadModel downloads;
+  BookmarksStore bookmarks;
+  HistoryStore history;
   ModsModel mods;
   ThemeController theme;
   theme.setWorkspaces(browser.workspaces());
@@ -270,6 +352,7 @@ int main(int argc, char* argv[])
   SplitViewController splitView;
   splitView.setBrowser(&browser);
   BrowserExtensionsModel extensions;
+  DiagnosticsController diagnostics;
   SitePermissionsStore& sitePermissions = SitePermissionsStore::instance();
   SessionStore session;
   session.attach(&browser, &splitView);
@@ -283,6 +366,26 @@ int main(int argc, char* argv[])
     &CommandBus::commandInvoked,
     &browser,
     [&browser, &splitView, &toast](const QString& id, const QVariantMap& args) {
+    if (id == "new-window") {
+      const QString profileId =
+        QStringLiteral("window-%1").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
+      const bool ok = QProcess::startDetached(
+        QCoreApplication::applicationFilePath(),
+        QStringList { QStringLiteral("--profile"), profileId });
+      if (!ok) {
+        toast.showToast(QStringLiteral("Failed to open new window"));
+      }
+      return;
+    }
+
+    if (id == "new-incognito-window") {
+      const bool ok = QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList { QStringLiteral("--incognito") });
+      if (!ok) {
+        toast.showToast(QStringLiteral("Failed to open incognito window"));
+      }
+      return;
+    }
+
     if (id == "new-tab") {
       const QUrl url = args.value("url").toUrl();
       browser.newTab(url.isValid() ? url : QUrl("about:blank"));
@@ -547,15 +650,19 @@ int main(int argc, char* argv[])
   });
   engine.rootContext()->setContextProperty("browser", &browser);
   engine.rootContext()->setContextProperty("commands", &commands);
+  engine.rootContext()->setContextProperty("shortcutStore", &shortcutStore);
   engine.rootContext()->setContextProperty("notifications", &notifications);
   engine.rootContext()->setContextProperty("toast", &toast);
   engine.rootContext()->setContextProperty("downloads", &downloads);
+  engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
+  engine.rootContext()->setContextProperty("history", &history);
   engine.rootContext()->setContextProperty("mods", &mods);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("themes", &themes);
   engine.rootContext()->setContextProperty("quickLinks", &quickLinks);
   engine.rootContext()->setContextProperty("splitView", &splitView);
   engine.rootContext()->setContextProperty("extensions", &extensions);
+  engine.rootContext()->setContextProperty("diagnostics", &diagnostics);
   engine.rootContext()->setContextProperty("sitePermissions", &sitePermissions);
   engine.load(QUrl("qrc:/ui/qml/Main.qml"));
   if (engine.rootObjects().isEmpty()) {

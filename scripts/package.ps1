@@ -1,7 +1,8 @@
 param(
-  [ValidateSet("Debug", "Release")]
-  [string]$Config = "Debug",
-  [string[]]$WindeployqtArgs = @()
+  [ValidateSet("Release", "Debug")]
+  [string]$Config = "Release",
+  [string]$OutDir = "dist",
+  [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,15 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $buildDir = Join-Path $repoRoot "build"
 $cachePath = Join-Path $buildDir "CMakeCache.txt"
+
+if (!(Test-Path $buildDir)) {
+  throw "Build dir not found: $buildDir (run CMake configure first)"
+}
+
+if (!$SkipBuild) {
+  Write-Host "Building ($Config)..." -ForegroundColor Cyan
+  cmake --build $buildDir --config $Config
+}
 
 if (!(Test-Path $cachePath)) {
   throw "CMake cache not found: $cachePath (run CMake configure first)"
@@ -60,7 +70,7 @@ if (Test-Path $configExe) {
   $exePath = $singleExe
 } else {
   $exe = Get-ChildItem -Path $buildDir -Recurse -Filter "xbrowser.exe" -File |
-    Where-Object { $_.FullName -match "\\$Config\\xbrowser\.exe$" } |
+    Where-Object { $_.FullName -match "\\$Config\\xbrowser\\.exe$" } |
     Select-Object -First 1
   if ($exe) {
     $exePath = $exe.FullName
@@ -76,34 +86,28 @@ if (!(Test-Path $qmlDir)) {
   throw "QML dir not found: $qmlDir"
 }
 
-$modeArg = if ($Config -eq "Debug") { "--debug" } else { "--release" }
+$distRoot = Join-Path $repoRoot $OutDir
+$distDir = Join-Path $distRoot $Config
 
-Write-Host "Deploying Qt runtime via windeployqt..." -ForegroundColor Cyan
-Write-Host "  Qt: $qtPrefix"
-Write-Host "  Exe: $exePath"
-
-$defaultArgs = @("--force", "--no-translations", "--compiler-runtime")
-foreach ($arg in $defaultArgs) {
-  if ($WindeployqtArgs -notcontains $arg) {
-    $WindeployqtArgs += $arg
-  }
+if (Test-Path $distDir) {
+  Remove-Item -Recurse -Force $distDir
 }
 
-& $windeployqt $modeArg "--qmldir" $qmlDir $WindeployqtArgs $exePath
+New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
+Write-Host "Packaging to: $distDir" -ForegroundColor Cyan
+Copy-Item -Path $exePath -Destination (Join-Path $distDir "xbrowser.exe") -Force
+
+$modeArg = if ($Config -eq "Debug") { "--debug" } else { "--release" }
+$args = @($modeArg, "--force", "--no-translations", "--compiler-runtime", "--qmldir", $qmlDir, (Join-Path $distDir "xbrowser.exe"))
+
+& $windeployqt @args
 
 $qtConfSource = Join-Path $repoRoot "cmake\\qt.conf"
 if (Test-Path $qtConfSource) {
-  $qtConfDest = Join-Path (Split-Path -Parent $exePath) "qt.conf"
-  Copy-Item -Path $qtConfSource -Destination $qtConfDest -Force
+  Copy-Item -Path $qtConfSource -Destination (Join-Path $distDir "qt.conf") -Force
 }
 
-$stampPath = Join-Path (Split-Path -Parent $exePath) (".xbrowser_qt_deploy_{0}.stamp" -f $Config)
-@{
-  config = $Config
-  qtPrefix = $qtPrefix
-  deployedAt = (Get-Date).ToString("o")
-} | ConvertTo-Json -Depth 3 | Set-Content -Path $stampPath -Encoding UTF8
+Write-Host "Done. Run:" -ForegroundColor Green
+Write-Host "  $distDir\\xbrowser.exe"
 
-Write-Host "Done. You can now run the exe directly from:" -ForegroundColor Green
-Write-Host "  $(Split-Path -Parent $exePath)"

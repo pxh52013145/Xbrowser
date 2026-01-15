@@ -89,8 +89,30 @@ void ExtensionsStore::ensureLoaded()
     meta.iconPath = obj.value(QStringLiteral("iconPath")).toString();
     meta.popupUrl = obj.value(QStringLiteral("popupUrl")).toString();
     meta.optionsUrl = obj.value(QStringLiteral("optionsUrl")).toString();
+    meta.installPath = obj.value(QStringLiteral("installPath")).toString();
+    meta.version = obj.value(QStringLiteral("version")).toString();
+    meta.description = obj.value(QStringLiteral("description")).toString();
+    meta.manifestMtimeMs = static_cast<qint64>(obj.value(QStringLiteral("manifestMtimeMs")).toDouble());
 
-    if (meta.iconPath.trimmed().isEmpty() && meta.popupUrl.trimmed().isEmpty() && meta.optionsUrl.trimmed().isEmpty()) {
+    const QJsonArray permsArr = obj.value(QStringLiteral("permissions")).toArray();
+    for (const QJsonValue& v : permsArr) {
+      const QString perm = v.toString().trimmed();
+      if (!perm.isEmpty() && !meta.permissions.contains(perm)) {
+        meta.permissions.push_back(perm);
+      }
+    }
+
+    const QJsonArray hostPermsArr = obj.value(QStringLiteral("hostPermissions")).toArray();
+    for (const QJsonValue& v : hostPermsArr) {
+      const QString perm = v.toString().trimmed();
+      if (!perm.isEmpty() && !meta.hostPermissions.contains(perm)) {
+        meta.hostPermissions.push_back(perm);
+      }
+    }
+
+    if (meta.iconPath.trimmed().isEmpty() && meta.popupUrl.trimmed().isEmpty() && meta.optionsUrl.trimmed().isEmpty()
+        && meta.installPath.trimmed().isEmpty() && meta.version.trimmed().isEmpty() && meta.description.trimmed().isEmpty()
+        && meta.permissions.isEmpty() && meta.hostPermissions.isEmpty() && meta.manifestMtimeMs <= 0) {
       continue;
     }
 
@@ -131,6 +153,42 @@ bool ExtensionsStore::saveNow()
     if (!meta.optionsUrl.trimmed().isEmpty()) {
       obj.insert(QStringLiteral("optionsUrl"), meta.optionsUrl);
     }
+    if (!meta.installPath.trimmed().isEmpty()) {
+      obj.insert(QStringLiteral("installPath"), meta.installPath);
+    }
+    if (!meta.version.trimmed().isEmpty()) {
+      obj.insert(QStringLiteral("version"), meta.version);
+    }
+    if (!meta.description.trimmed().isEmpty()) {
+      obj.insert(QStringLiteral("description"), meta.description);
+    }
+    if (meta.manifestMtimeMs > 0) {
+      obj.insert(QStringLiteral("manifestMtimeMs"), static_cast<double>(meta.manifestMtimeMs));
+    }
+    if (!meta.permissions.isEmpty()) {
+      QJsonArray arr;
+      for (const QString& perm : meta.permissions) {
+        const QString trimmed = perm.trimmed();
+        if (!trimmed.isEmpty()) {
+          arr.push_back(trimmed);
+        }
+      }
+      if (!arr.isEmpty()) {
+        obj.insert(QStringLiteral("permissions"), arr);
+      }
+    }
+    if (!meta.hostPermissions.isEmpty()) {
+      QJsonArray arr;
+      for (const QString& perm : meta.hostPermissions) {
+        const QString trimmed = perm.trimmed();
+        if (!trimmed.isEmpty()) {
+          arr.push_back(trimmed);
+        }
+      }
+      if (!arr.isEmpty()) {
+        obj.insert(QStringLiteral("hostPermissions"), arr);
+      }
+    }
 
     if (!obj.isEmpty()) {
       metaObj.insert(id, obj);
@@ -138,7 +196,7 @@ bool ExtensionsStore::saveNow()
   }
 
   QJsonObject root;
-  root.insert(QStringLiteral("version"), 1);
+  root.insert(QStringLiteral("version"), 2);
   root.insert(QStringLiteral("pinned"), pinnedArr);
   root.insert(QStringLiteral("meta"), metaObj);
 
@@ -220,6 +278,54 @@ QString ExtensionsStore::optionsUrlFor(const QString& extensionId)
   return it == m_meta.constEnd() ? QString() : it->optionsUrl;
 }
 
+QString ExtensionsStore::installPathFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? QString() : it->installPath;
+}
+
+QString ExtensionsStore::versionFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? QString() : it->version;
+}
+
+QString ExtensionsStore::descriptionFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? QString() : it->description;
+}
+
+QStringList ExtensionsStore::permissionsFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? QStringList() : it->permissions;
+}
+
+QStringList ExtensionsStore::hostPermissionsFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? QStringList() : it->hostPermissions;
+}
+
+qint64 ExtensionsStore::manifestMtimeMsFor(const QString& extensionId)
+{
+  ensureLoaded();
+  const QString id = normalizedId(extensionId);
+  const auto it = m_meta.constFind(id);
+  return it == m_meta.constEnd() ? 0 : it->manifestMtimeMs;
+}
+
 void ExtensionsStore::setMeta(
   const QString& extensionId,
   const QString& iconPath,
@@ -245,6 +351,51 @@ void ExtensionsStore::setMeta(
   }
 
   if (next.iconPath.isEmpty() && next.popupUrl.isEmpty() && next.optionsUrl.isEmpty()) {
+    m_meta.remove(id);
+  } else {
+    m_meta.insert(id, next);
+  }
+
+  saveNow();
+  bumpRevision();
+}
+
+void ExtensionsStore::setManifestMeta(
+  const QString& extensionId,
+  const QString& installPath,
+  const QString& version,
+  const QString& description,
+  const QStringList& permissions,
+  const QStringList& hostPermissions,
+  qint64 manifestMtimeMs)
+{
+  ensureLoaded();
+
+  const QString id = normalizedId(extensionId);
+  if (id.isEmpty()) {
+    return;
+  }
+
+  Meta next = m_meta.value(id);
+  next.installPath = installPath.trimmed();
+  next.version = version.trimmed();
+  next.description = description.trimmed();
+  next.permissions = permissions;
+  next.hostPermissions = hostPermissions;
+  next.manifestMtimeMs = manifestMtimeMs;
+
+  const auto prevIt = m_meta.constFind(id);
+  if (prevIt != m_meta.constEnd() && prevIt->installPath == next.installPath && prevIt->version == next.version
+      && prevIt->description == next.description && prevIt->permissions == next.permissions
+      && prevIt->hostPermissions == next.hostPermissions && prevIt->manifestMtimeMs == next.manifestMtimeMs) {
+    return;
+  }
+
+  const bool empty = next.iconPath.trimmed().isEmpty() && next.popupUrl.trimmed().isEmpty() && next.optionsUrl.trimmed().isEmpty()
+                     && next.installPath.trimmed().isEmpty() && next.version.trimmed().isEmpty() && next.description.trimmed().isEmpty()
+                     && next.permissions.isEmpty() && next.hostPermissions.isEmpty() && next.manifestMtimeMs <= 0;
+
+  if (empty) {
     m_meta.remove(id);
   } else {
     m_meta.insert(id, next);
@@ -294,4 +445,3 @@ void ExtensionsStore::clearAll()
   saveNow();
   bumpRevision();
 }
-

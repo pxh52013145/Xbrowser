@@ -54,9 +54,13 @@ ApplicationWindow {
                                         && (!browser.settings.compactMode || topBarHovered || compactTopHover
                                             || addressField.activeFocus || (root.popupManagerContext === "omnibox"))
     readonly property bool showSidebar: browser.settings.sidebarExpanded
-                                        && (!browser.settings.compactMode || sidebarHovered || compactSidebarHover)
+                                        && (!browser.settings.compactMode
+                                            || sidebarHovered
+                                            || compactSidebarHover
+                                            || (root.popupManagerContext && root.popupManagerContext.startsWith("sidebar-tool-")))
 
     readonly property bool sidebarIconOnly: browser.settings.sidebarExpanded && browser.settings.sidebarWidth <= 200
+    property string sidebarPanel: "tabs"
 
     readonly property int uiRadius: theme.cornerRadius
     readonly property int uiSpacing: theme.spacing
@@ -103,6 +107,7 @@ ApplicationWindow {
     property var webContextMenuItems: []
 
     property string popupManagerContext: ""
+    property string toolWindowManagerContext: ""
     property string overlayHostContext: ""
 
     property string extensionsPanelSearch: ""
@@ -114,6 +119,8 @@ ApplicationWindow {
     readonly property var browserModel: browser
     readonly property var notificationsModel: notifications
     readonly property var downloadsModel: downloads
+    readonly property var bookmarksModel: bookmarks
+    readonly property var historyModel: history
     readonly property var themesModel: themes
     readonly property var modsModel: mods
 
@@ -187,9 +194,13 @@ ApplicationWindow {
         Menu {
             title: "File"
             MenuItem { text: "New Tab"; onTriggered: commands.invoke("new-tab") }
+            MenuItem { text: "New Window"; onTriggered: commands.invoke("new-window") }
+            MenuItem { text: "New Incognito Window"; onTriggered: commands.invoke("new-incognito-window") }
             MenuItem { text: "Close Tab"; onTriggered: commands.invoke("close-tab") }
             MenuSeparator { }
             MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
+            MenuSeparator { }
+            MenuItem { text: "Print"; onTriggered: commands.invoke("open-print") }
             MenuSeparator { }
             MenuItem { text: "Quit"; onTriggered: Qt.quit() }
         }
@@ -218,10 +229,15 @@ ApplicationWindow {
 
         Menu {
             title: "Tools"
+            MenuItem { text: "Settings"; onTriggered: commands.invoke("open-settings") }
             MenuItem { text: "Themes"; onTriggered: root.openOverlay(themesDialogComponent, "themes") }
             MenuItem { text: "Mods"; onTriggered: commands.invoke("open-mods") }
             MenuItem { text: "Extensions"; onTriggered: commands.invoke("open-extensions") }
             MenuItem { text: "Downloads"; onTriggered: root.openOverlay(downloadsDialogComponent, "downloads") }
+            MenuItem { text: "Bookmarks"; onTriggered: commands.invoke("open-bookmarks") }
+            MenuItem { text: "History"; onTriggered: commands.invoke("open-history") }
+            MenuItem { text: "Permissions"; onTriggered: commands.invoke("open-permissions") }
+            MenuItem { text: "Diagnostics"; onTriggered: commands.invoke("open-diagnostics") }
             MenuItem { text: "DevTools"; onTriggered: commands.invoke("open-devtools") }
         }
 
@@ -454,6 +470,21 @@ ApplicationWindow {
 
         popupManager.openAtItem(extensionPopupComponent, anchorItem)
         root.popupManagerContext = "extension-popup"
+    }
+
+    function toggleSidebarToolPopup(toolId, component, anchorItem) {
+        if (!component || !anchorItem) {
+            return
+        }
+
+        const ctx = "sidebar-tool-" + String(toolId || "")
+        if (popupManager.opened && root.popupManagerContext === ctx) {
+            popupManager.close()
+            return
+        }
+
+        popupManager.openAtItem(component, anchorItem)
+        root.popupManagerContext = ctx
     }
 
     function buildExtensionContextMenuItems(extensionId, name, enabled, pinned, popupUrl, optionsUrl) {
@@ -1111,20 +1142,29 @@ ApplicationWindow {
             return
         }
 
-        const isCommandMode = trimmed.startsWith(">")
+            const isCommandMode = trimmed.startsWith(">")
         if (isCommandMode) {
             const query = trimmed.slice(1).trim()
             const baseCommands = [
                 { group: "Tabs", title: "New Tab", command: "new-tab", args: {}, shortcut: "Ctrl+T" },
+                { group: "Windows", title: "New Window", command: "new-window", args: {}, shortcut: "Ctrl+N" },
+                { group: "Windows", title: "New Incognito Window", command: "new-incognito-window", args: {}, shortcut: "Ctrl+Shift+N" },
                 { group: "Tabs", title: "Close Tab", command: "close-tab", args: { tabId: root.focusedTabId }, shortcut: "Ctrl+W" },
                 { group: "Tabs", title: "Restore Closed Tab", command: "restore-closed-tab", args: {}, shortcut: "Ctrl+Shift+T" },
                 { group: "Tabs", title: "Duplicate Tab", command: "duplicate-tab", args: { tabId: root.focusedTabId }, shortcut: "" },
+                { group: "Tabs", title: "Switch Tab", command: "open-tab-switcher", args: {}, shortcut: "Ctrl+K" },
                 { group: "Navigation", title: "Reload", command: "nav-reload", args: {}, shortcut: "Ctrl+R" },
+                { group: "Navigation", title: "Find in Page", command: "open-find", args: {}, shortcut: "Ctrl+F" },
                  { group: "View", title: "Toggle Sidebar", command: "toggle-sidebar", args: {}, shortcut: "Ctrl+B" },
                  { group: "View", title: "Toggle Address Bar", command: "toggle-addressbar", args: {}, shortcut: "Ctrl+Shift+L" },
                  { group: "View", title: splitView.enabled ? "Unsplit View" : "Split View", command: "toggle-split-view", args: {}, shortcut: "Ctrl+E" },
+                 { group: "Tools", title: "Settings", command: "open-settings", args: {}, shortcut: "Ctrl+," },
+                 { group: "Output", title: "Print / Save PDF", command: "open-print", args: {}, shortcut: "Ctrl+P" },
                  { group: "Tools", title: "Downloads", command: "open-downloads", args: {}, shortcut: "Ctrl+J" },
+                 { group: "Tools", title: "Bookmarks", command: "open-bookmarks", args: {}, shortcut: "Ctrl+D" },
+                 { group: "Tools", title: "History", command: "open-history", args: {}, shortcut: "Ctrl+H" },
                  { group: "Tools", title: "Mods", command: "open-mods", args: {}, shortcut: "" },
+                 { group: "Tools", title: "Themes", command: "open-themes", args: {}, shortcut: "" },
                  { group: "Tools", title: "Extensions", command: "open-extensions", args: {}, shortcut: "" },
                  { group: "Tools", title: "DevTools", command: "open-devtools", args: {}, shortcut: "F12" },
                  { group: "Workspaces", title: "New Workspace", command: "new-workspace", args: {}, shortcut: "" },
@@ -1410,6 +1450,14 @@ ApplicationWindow {
                 }
 
                 Button {
+                    text: "Settings"
+                    onClicked: {
+                        popupManager.close()
+                        commands.invoke("open-settings")
+                    }
+                }
+
+                Button {
                     text: "Extensions"
                     onClicked: {
                         popupManager.close()
@@ -1421,6 +1469,14 @@ ApplicationWindow {
                     text: "Downloads"
                     onClicked: {
                         root.openOverlay(downloadsDialogComponent, "downloads")
+                    }
+                }
+
+                Button {
+                    text: "Bookmarks"
+                    onClicked: {
+                        popupManager.close()
+                        commands.invoke("open-bookmarks")
                     }
                 }
 
@@ -1990,6 +2046,7 @@ ApplicationWindow {
             reloadButton,
             sitePanelButton,
             addressField,
+            bookmarkButton,
             emojiButton,
             newTabButton,
             extensionsToolbar,
@@ -2172,6 +2229,28 @@ ApplicationWindow {
                     }
                     addressField.focus = false
                     event.accepted = true
+                }
+            }
+
+            ToolButton {
+                id: bookmarkButton
+                visible: showTopBar
+                text: {
+                    const view = root.focusedView
+                    if (!view || !bookmarks) {
+                        return "☆"
+                    }
+                    return bookmarks.isBookmarked(view.currentUrl) ? "★" : "☆"
+                }
+                enabled: root.focusedView && root.focusedView.currentUrl && root.focusedView.currentUrl.toString().length > 0
+                onClicked: {
+                    const view = root.focusedView
+                    if (!view || !bookmarks) {
+                        return
+                    }
+                    const wasBookmarked = bookmarks.isBookmarked(view.currentUrl)
+                    bookmarks.toggleBookmark(view.currentUrl, view.title)
+                    toast.showToast(wasBookmarked ? "Bookmark removed" : "Bookmarked")
                 }
             }
 
@@ -2729,6 +2808,101 @@ ApplicationWindow {
                 anchors.margins: 8
                 spacing: 8
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    function buttonColor(active) {
+                        return active ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16) : Qt.rgba(0, 0, 0, 0.04)
+                    }
+
+                    function buttonBorder(active) {
+                        return active ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : Qt.rgba(0, 0, 0, 0.08)
+                    }
+
+                    ToolButton {
+                        id: sidebarTabsButton
+                        text: root.sidebarIconOnly ? "T" : "Tabs"
+                        onClicked: {
+                            if (popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")) {
+                                popupManager.close()
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(!(popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")))
+                            border.color: buttonBorder(!(popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")))
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Tabs"
+                    }
+
+                    ToolButton {
+                        id: sidebarBookmarksButton
+                        text: root.sidebarIconOnly ? "\u2605" : "Bookmarks"
+                        onClicked: root.toggleSidebarToolPopup("bookmarks", sidebarBookmarksPopupComponent, sidebarBookmarksButton)
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(root.popupManagerContext === "sidebar-tool-bookmarks")
+                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-bookmarks")
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Bookmarks"
+                    }
+
+                    ToolButton {
+                        id: sidebarHistoryButton
+                        text: root.sidebarIconOnly ? "H" : "History"
+                        onClicked: root.toggleSidebarToolPopup("history", sidebarHistoryPopupComponent, sidebarHistoryButton)
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(root.popupManagerContext === "sidebar-tool-history")
+                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-history")
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "History"
+                    }
+
+                    ToolButton {
+                        id: sidebarDownloadsButton
+                        text: root.sidebarIconOnly ? "D" : "Downloads"
+                        onClicked: root.toggleSidebarToolPopup("downloads", sidebarDownloadsPopupComponent, sidebarDownloadsButton)
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(root.popupManagerContext === "sidebar-tool-downloads")
+                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-downloads")
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Downloads"
+                    }
+
+                    ToolButton {
+                        id: sidebarExtensionsButton
+                        text: root.sidebarIconOnly ? "E" : "Extensions"
+                        enabled: extensions && extensions.ready === true
+                        onClicked: root.toggleSidebarToolPopup("extensions", sidebarExtensionsPopupComponent, sidebarExtensionsButton)
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(root.popupManagerContext === "sidebar-tool-extensions")
+                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-extensions")
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Extensions"
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
                 TabFilterModel {
                     id: essentialsTabs
                     sourceTabs: browser.tabs
@@ -2748,7 +2922,7 @@ ApplicationWindow {
                     text: "Essentials"
                     font.pixelSize: 12
                     opacity: 0.7
-                    visible: !root.sidebarIconOnly && essentialsView.count > 0
+                    visible: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && essentialsView.count > 0
                 }
 
                 GridView {
@@ -2757,7 +2931,7 @@ ApplicationWindow {
                     Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
                     clip: true
                     model: essentialsTabs
-                    readonly property bool active: root.sidebarIconOnly && count > 0
+                    readonly property bool active: root.sidebarPanel === "tabs" && root.sidebarIconOnly && count > 0
                     visible: active
                     activeFocusOnTab: true
                     currentIndex: -1
@@ -2874,7 +3048,7 @@ ApplicationWindow {
                     Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
                     clip: true
                     model: essentialsTabs
-                    readonly property bool active: !root.sidebarIconOnly && count > 0
+                    readonly property bool active: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && count > 0
                     visible: active
                     activeFocusOnTab: true
                     currentIndex: -1
@@ -3155,6 +3329,7 @@ ApplicationWindow {
                 Item {
                     Layout.fillWidth: true
                     implicitHeight: tabsLabel.implicitHeight
+                    visible: root.sidebarPanel === "tabs"
 
                     Label {
                         id: tabsLabel
@@ -3187,7 +3362,7 @@ ApplicationWindow {
 
                 Frame {
                     Layout.fillWidth: true
-                    visible: !root.sidebarIconOnly && browser.tabs && Number(browser.tabs.selectedCount || 0) > 1
+                    visible: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && browser.tabs && Number(browser.tabs.selectedCount || 0) > 1
                     padding: 8
 
                     background: Rectangle {
@@ -3235,6 +3410,7 @@ ApplicationWindow {
                     delegate: ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 4
+                        visible: root.sidebarPanel === "tabs"
 
                         property bool searching: false
                         property bool renaming: false
@@ -3759,6 +3935,7 @@ ApplicationWindow {
                     id: tabList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    visible: root.sidebarPanel === "tabs"
                     clip: true
                     model: regularTabs
                     activeFocusOnTab: true
@@ -4158,11 +4335,13 @@ ApplicationWindow {
 
                 NotificationsStack {
                     Layout.fillWidth: true
+                    visible: root.sidebarPanel === "tabs"
                     notifications: root.notificationsModel
                 }
 
                 MediaControls {
                     Layout.fillWidth: true
+                    visible: root.sidebarPanel === "tabs"
                     view: root.mediaView
                 }
 
@@ -4341,6 +4520,16 @@ ApplicationWindow {
                     onIsLoadingChanged: {
                         if (tabId > 0) {
                             browser.setTabIsLoadingById(tabId, isLoading)
+                        }
+                    }
+
+                    onNavigationCommitted: (success) => {
+                        if (!success) {
+                            return
+                        }
+                        const store = root.historyModel
+                        if (store && store.addVisit) {
+                            store.addVisit(currentUrl, title)
                         }
                     }
 
@@ -4749,6 +4938,31 @@ ApplicationWindow {
         id: popupManager
     }
 
+    ToolWindowManager {
+        id: toolWindowManager
+    }
+
+    Component {
+        id: findBarComponent
+
+        FindBar {
+            view: root.focusedView
+            onCloseRequested: toolWindowManager.close()
+            Component.onCompleted: focusQuery()
+        }
+    }
+
+    Component {
+        id: tabSwitcherComponent
+
+        TabSwitcher {
+            tabs: root.browserModel.tabs
+            browser: root.browserModel
+            onCloseRequested: popupManager.close()
+            Component.onCompleted: openSwitcher()
+        }
+    }
+
     Connections {
         target: popupManager
 
@@ -4776,6 +4990,17 @@ ApplicationWindow {
             }
 
             root.popupManagerContext = ""
+        }
+    }
+
+    Connections {
+        target: toolWindowManager
+
+        function onClosed() {
+            if (root.toolWindowManagerContext === "find-bar") {
+                // no persistent state yet
+            }
+            root.toolWindowManagerContext = ""
         }
     }
 
@@ -4886,16 +5111,69 @@ ApplicationWindow {
                 }
                 return
             }
+            if (id === "open-settings") {
+                root.openOverlay(settingsDialogComponent, "settings")
+                return
+            }
             if (id === "open-downloads") {
                 popupManager.openAtItem(downloadsPanelComponent, downloadsButton)
+                return
+            }
+            if (id === "open-bookmarks") {
+                root.openOverlay(bookmarksPanelComponent, "bookmarks")
+                return
+            }
+            if (id === "open-history") {
+                root.openOverlay(historyPanelComponent, "history")
+                return
+            }
+            if (id === "open-permissions") {
+                root.openOverlay(permissionsCenterComponent, "permissions")
+                return
+            }
+            if (id === "open-find") {
+                if (root.toolWindowManagerContext === "find-bar" && toolWindowManager.opened && toolWindowManager.popupItem) {
+                    if (toolWindowManager.popupItem.focusQuery) {
+                        toolWindowManager.popupItem.focusQuery()
+                    }
+                    return
+                }
+                root.toolWindowManagerContext = "find-bar"
+                const x = Math.max(8, Math.round(root.width - 16))
+                const y = Math.round(topBar.height + 12)
+                toolWindowManager.openAtPoint(findBarComponent, x, y, root)
+                return
+            }
+            if (id === "open-tab-switcher") {
+                root.popupManagerContext = "tab-switcher"
+                const w = 620
+                const x = Math.max(8, Math.round((root.width - w) / 2))
+                const y = Math.round(topBar.height + 24)
+                popupManager.openAtPoint(tabSwitcherComponent, x, y, root)
+                return
+            }
+            if (id === "open-print") {
+                root.openOverlay(printDialogComponent, "print")
                 return
             }
             if (id === "open-mods") {
                 root.openOverlay(modsDialogComponent, "mods")
                 return
             }
+            if (id === "open-themes") {
+                root.openOverlay(themesDialogComponent, "themes")
+                return
+            }
             if (id === "open-extensions") {
                 root.openOverlay(extensionsDialogComponent, "extensions")
+                return
+            }
+            if (id === "open-welcome") {
+                root.openOverlay(onboardingDialogComponent, "onboarding")
+                return
+            }
+            if (id === "open-diagnostics") {
+                root.openOverlay(diagnosticsDialogComponent, "diagnostics")
                 return
             }
             if (id === "open-latest-download-file") {
@@ -4938,10 +5216,164 @@ ApplicationWindow {
     }
 
     Component {
+        id: settingsDialogComponent
+
+        SettingsDialog {
+            settings: root.browserModel.settings
+            themes: root.themesModel
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
         id: downloadsDialogComponent
 
         DownloadsDialog {
             downloads: root.downloadsModel
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: sidebarBookmarksPopupComponent
+
+        Item {
+            property int maxHeight: 0
+            implicitWidth: 720
+            implicitHeight: maxHeight > 0 ? Math.min(560, maxHeight) : 560
+
+            BookmarksPanel {
+                anchors.fill: parent
+                bookmarks: root.bookmarksModel
+                embedded: true
+                onCloseRequested: popupManager.close()
+            }
+        }
+    }
+
+    Component {
+        id: sidebarHistoryPopupComponent
+
+        Item {
+            property int maxHeight: 0
+            implicitWidth: 760
+            implicitHeight: maxHeight > 0 ? Math.min(580, maxHeight) : 580
+
+            HistoryPanel {
+                anchors.fill: parent
+                history: root.historyModel
+                embedded: true
+                onCloseRequested: popupManager.close()
+            }
+        }
+    }
+
+    Component {
+        id: sidebarDownloadsPopupComponent
+
+        Item {
+            property int maxHeight: 0
+            implicitWidth: 620
+            implicitHeight: maxHeight > 0 ? Math.min(480, maxHeight) : 480
+
+            DownloadsDialog {
+                anchors.fill: parent
+                downloads: root.downloadsModel
+                embedded: true
+                onCloseRequested: popupManager.close()
+            }
+        }
+    }
+
+    Component {
+        id: sidebarExtensionsPopupComponent
+
+        Item {
+            property int maxHeight: 0
+            implicitWidth: 980
+            implicitHeight: maxHeight > 0 ? Math.min(660, maxHeight) : 660
+
+            ExtensionsDialog {
+                anchors.fill: parent
+                extensions: extensions
+                embedded: true
+                onCloseRequested: popupManager.close()
+            }
+        }
+    }
+
+    Component {
+        id: sidebarBookmarksPanelComponent
+
+        BookmarksPanel {
+            bookmarks: root.bookmarksModel
+            embedded: true
+            onCloseRequested: root.sidebarPanel = "tabs"
+        }
+    }
+
+    Component {
+        id: sidebarHistoryPanelComponent
+
+        HistoryPanel {
+            history: root.historyModel
+            embedded: true
+            onCloseRequested: root.sidebarPanel = "tabs"
+        }
+    }
+
+    Component {
+        id: sidebarDownloadsPanelComponent
+
+        DownloadsDialog {
+            downloads: root.downloadsModel
+            embedded: true
+            onCloseRequested: root.sidebarPanel = "tabs"
+        }
+    }
+
+    Component {
+        id: sidebarExtensionsPanelComponent
+
+        ExtensionsDialog {
+            extensions: extensions
+            embedded: true
+            onCloseRequested: root.sidebarPanel = "tabs"
+        }
+    }
+
+    Component {
+        id: bookmarksPanelComponent
+
+        BookmarksPanel {
+            bookmarks: root.bookmarksModel
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: historyPanelComponent
+
+        HistoryPanel {
+            history: root.historyModel
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: permissionsCenterComponent
+
+        PermissionsCenter {
+            store: sitePermissions
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: printDialogComponent
+
+        PrintDialog {
+            view: root.focusedView
             onCloseRequested: overlayHost.hide()
         }
     }
@@ -4960,6 +5392,15 @@ ApplicationWindow {
 
         ExtensionsDialog {
             extensions: extensions
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: diagnosticsDialogComponent
+
+        DiagnosticsDialog {
+            diagnostics: diagnostics
             onCloseRequested: overlayHost.hide()
         }
     }

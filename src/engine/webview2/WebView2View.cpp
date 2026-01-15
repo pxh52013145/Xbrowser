@@ -13,6 +13,8 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QMetaObject>
 #include <QQuickWindow>
 #include <QUrl>
 
@@ -265,6 +267,67 @@ void WebView2View::openDevTools()
 {
   if (m_webView) {
     m_webView->OpenDevToolsWindow();
+  }
+}
+
+void WebView2View::showPrintUI()
+{
+  if (!m_webView) {
+    return;
+  }
+
+  Microsoft::WRL::ComPtr<ICoreWebView2_16> webView16;
+  if (SUCCEEDED(m_webView.As(&webView16)) && webView16) {
+    webView16->ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM);
+    return;
+  }
+
+  executeScript(QStringLiteral("window.print();"));
+}
+
+void WebView2View::printToPdf(const QString& filePath)
+{
+  const QString trimmed = filePath.trimmed();
+  if (trimmed.isEmpty()) {
+    emit printToPdfFinished(trimmed, false, QStringLiteral("PDF output path is empty."));
+    return;
+  }
+  if (!m_webView) {
+    emit printToPdfFinished(trimmed, false, QStringLiteral("WebView2 is not initialized."));
+    return;
+  }
+
+  const QFileInfo info(trimmed);
+  if (!info.absoluteDir().exists()) {
+    QDir().mkpath(info.absolutePath());
+  }
+
+  Microsoft::WRL::ComPtr<ICoreWebView2_7> webView7;
+  if (FAILED(m_webView.As(&webView7)) || !webView7) {
+    emit printToPdfFinished(trimmed, false, QStringLiteral("PrintToPdf is unavailable in this WebView2 version."));
+    return;
+  }
+
+  const std::wstring path = toWide(QDir::toNativeSeparators(trimmed));
+  const HRESULT hr = webView7->PrintToPdf(
+    path.c_str(),
+    nullptr,
+    Callback<ICoreWebView2PrintToPdfCompletedHandler>(
+      [this, trimmed](HRESULT errorCode, BOOL result) -> HRESULT {
+        const bool ok = SUCCEEDED(errorCode) && (result == TRUE);
+        const QString err = ok ? QString() : hresultMessage(errorCode);
+        QMetaObject::invokeMethod(
+          this,
+          [this, trimmed, ok, err] {
+            emit printToPdfFinished(trimmed, ok, err);
+          },
+          Qt::QueuedConnection);
+        return S_OK;
+      })
+      .Get());
+
+  if (FAILED(hr)) {
+    emit printToPdfFinished(trimmed, false, hresultMessage(hr));
   }
 }
 
@@ -585,9 +648,18 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
 
         m_webView->add_NavigationCompleted(
           Callback<ICoreWebView2NavigationCompletedEventHandler>(
-            [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+            [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+              bool success = true;
+              if (args) {
+                BOOL isSuccess = TRUE;
+                if (SUCCEEDED(args->get_IsSuccess(&isSuccess))) {
+                  success = (isSuccess == TRUE);
+                }
+              }
+
               setIsLoading(false);
               updateNavigationState();
+              emit navigationCommitted(success);
               return S_OK;
             })
             .Get(),

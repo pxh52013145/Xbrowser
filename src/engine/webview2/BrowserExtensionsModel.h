@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 #include <QVector>
 
@@ -30,6 +31,12 @@ public:
     IconUrlRole,
     PopupUrlRole,
     OptionsUrlRole,
+    VersionRole,
+    DescriptionRole,
+    InstallPathRole,
+    PermissionsRole,
+    HostPermissionsRole,
+    UpdateAvailableRole,
   };
   Q_ENUM(Role)
 
@@ -66,6 +73,12 @@ private:
     QUrl iconUrl;
     QString popupUrl;
     QString optionsUrl;
+    QString version;
+    QString description;
+    QString installPath;
+    QStringList permissions;
+    QStringList hostPermissions;
+    bool updateAvailable = false;
     Microsoft::WRL::ComPtr<ICoreWebView2BrowserExtension> handle;
   };
 

@@ -41,9 +41,21 @@ function Test-DeployedQtRuntime([string]$Dir) {
     return $false
   }
 
-  $qtCore = Get-ChildItem -Path $Dir -Filter "Qt6Core*.dll" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-  if (!$qtCore) {
-    return $false
+  $requiredDllPatterns = @(
+    "Qt6Core*.dll",
+    "Qt6Gui*.dll",
+    "Qt6Qml*.dll",
+    "Qt6Quick*.dll",
+    "Qt6QuickControls2*.dll",
+    "Qt6Network*.dll",
+    "Qt6OpenGL*.dll"
+  )
+
+  foreach ($pattern in $requiredDllPatterns) {
+    $dll = Get-ChildItem -Path $Dir -Filter $pattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (!$dll) {
+      return $false
+    }
   }
 
   $platformsDir = Join-Path $Dir "platforms"
@@ -64,6 +76,28 @@ function Test-DeployedQtRuntime([string]$Dir) {
   return $true
 }
 
+function Get-DeployStampPath([string]$ExeDir, [string]$Config) {
+  if (!$ExeDir) {
+    return $null
+  }
+  return (Join-Path $ExeDir (".xbrowser_qt_deploy_{0}.stamp" -f $Config))
+}
+
+function Test-DeployStampUpToDate([string]$ExePath, [string]$ExeDir, [string]$Config) {
+  if (!$ExePath -or !(Test-Path $ExePath)) {
+    return $false
+  }
+
+  $stamp = Get-DeployStampPath $ExeDir $Config
+  if (!$stamp -or !(Test-Path $stamp)) {
+    return $false
+  }
+
+  $exeTime = (Get-Item $ExePath).LastWriteTimeUtc
+  $stampTime = (Get-Item $stamp).LastWriteTimeUtc
+  return $stampTime -ge $exeTime
+}
+
 function Ensure-QtConf([string]$ExeDir) {
   $qtConfSource = Join-Path $repoRoot "cmake\\qt.conf"
   $qtConfDest = Join-Path $ExeDir "qt.conf"
@@ -72,7 +106,7 @@ function Ensure-QtConf([string]$ExeDir) {
   }
 }
 
-if (Test-DeployedQtRuntime $exeDir) {
+if ((Test-DeployedQtRuntime $exeDir) -and (Test-DeployStampUpToDate $exePath $exeDir $Config)) {
   Ensure-QtConf $exeDir
   Write-Host "Running (deployed Qt): $exePath" -ForegroundColor Cyan
   & $exePath @Args
@@ -89,7 +123,7 @@ if (Test-Path $deployScript) {
   }
 }
 
-if (Test-DeployedQtRuntime $exeDir) {
+if ((Test-DeployedQtRuntime $exeDir) -and (Test-DeployStampUpToDate $exePath $exeDir $Config)) {
   Ensure-QtConf $exeDir
   Write-Host "Running (deployed Qt): $exePath" -ForegroundColor Cyan
   & $exePath @Args

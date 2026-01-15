@@ -29,6 +29,20 @@ If you see missing Qt DLL errors (e.g. `Qt6QuickControls2d.dll`), you need eithe
 - Run from a shell with Qt on `PATH` (dev workflow): `.\scripts\run.ps1 -Config Debug` (or double-click `scripts\run.cmd`)
 - Or deploy Qt runtime next to the exe (double-clickable): `.\scripts\deploy.ps1 -Config Debug` (or double-click `scripts\deploy.cmd`)
 
+## Packaging (portable folder)
+
+To create a self-contained runnable folder (Qt DLLs + plugins + compiler runtime), run:
+
+```powershell
+.\scripts\package.ps1 -Config Release
+```
+
+Or double-click: `scripts\\package.cmd`
+
+Output:
+
+- `dist\\Release\\xbrowser.exe`
+
 ## WebView2 SDK notes
 
 This repo uses the **Microsoft.Web.WebView2** NuGet package for headers/libs.

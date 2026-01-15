@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
@@ -67,6 +68,10 @@ struct ManifestMeta
   QString iconPath;
   QString popupRelPath;
   QString optionsRelPath;
+  QString version;
+  QString description;
+  QStringList permissions;
+  QStringList hostPermissions;
 };
 
 QString pickIconRelPath(const QJsonObject& iconsObj)
@@ -105,6 +110,25 @@ ManifestMeta parseManifestMeta(const QString& folderPath)
   }
 
   const QJsonObject root = doc.object();
+
+  meta.version = root.value(QStringLiteral("version")).toString().trimmed();
+  meta.description = root.value(QStringLiteral("description")).toString().trimmed();
+
+  const QJsonArray permsArr = root.value(QStringLiteral("permissions")).toArray();
+  for (const QJsonValue& v : permsArr) {
+    const QString perm = v.toString().trimmed();
+    if (!perm.isEmpty() && !meta.permissions.contains(perm)) {
+      meta.permissions.push_back(perm);
+    }
+  }
+
+  const QJsonArray hostPermsArr = root.value(QStringLiteral("host_permissions")).toArray();
+  for (const QJsonValue& v : hostPermsArr) {
+    const QString perm = v.toString().trimmed();
+    if (!perm.isEmpty() && !meta.hostPermissions.contains(perm)) {
+      meta.hostPermissions.push_back(perm);
+    }
+  }
 
   const QJsonObject iconsObj = root.value(QStringLiteral("icons")).toObject();
   const QString iconRel = pickIconRelPath(iconsObj);
@@ -209,6 +233,18 @@ QVariant BrowserExtensionsModel::data(const QModelIndex& index, int role) const
       return entry.popupUrl;
     case OptionsUrlRole:
       return entry.optionsUrl;
+    case VersionRole:
+      return entry.version;
+    case DescriptionRole:
+      return entry.description;
+    case InstallPathRole:
+      return entry.installPath;
+    case PermissionsRole:
+      return entry.permissions;
+    case HostPermissionsRole:
+      return entry.hostPermissions;
+    case UpdateAvailableRole:
+      return entry.updateAvailable;
     default:
       return {};
   }
@@ -224,6 +260,12 @@ QHash<int, QByteArray> BrowserExtensionsModel::roleNames() const
     {IconUrlRole, "iconUrl"},
     {PopupUrlRole, "popupUrl"},
     {OptionsUrlRole, "optionsUrl"},
+    {VersionRole, "version"},
+    {DescriptionRole, "description"},
+    {InstallPathRole, "installPath"},
+    {PermissionsRole, "permissions"},
+    {HostPermissionsRole, "hostPermissions"},
+    {UpdateAvailableRole, "updateAvailable"},
   };
 }
 
@@ -384,6 +426,23 @@ void BrowserExtensionsModel::refresh()
               }
               entry.popupUrl = store.popupUrlFor(entry.id);
               entry.optionsUrl = store.optionsUrlFor(entry.id);
+              entry.installPath = store.installPathFor(entry.id);
+              entry.version = store.versionFor(entry.id);
+              entry.description = store.descriptionFor(entry.id);
+              entry.permissions = store.permissionsFor(entry.id);
+              entry.hostPermissions = store.hostPermissionsFor(entry.id);
+              entry.updateAvailable = false;
+              if (!entry.installPath.trimmed().isEmpty()) {
+                const QString manifestPath = QDir(entry.installPath).filePath(QStringLiteral("manifest.json"));
+                const QFileInfo manifestInfo(manifestPath);
+                if (manifestInfo.exists()) {
+                  const qint64 stored = store.manifestMtimeMsFor(entry.id);
+                  const qint64 current = manifestInfo.lastModified().toMSecsSinceEpoch();
+                  if (stored > 0 && current > stored) {
+                    entry.updateAvailable = true;
+                  }
+                }
+              }
             }
 
             clearError();
@@ -430,11 +489,13 @@ void BrowserExtensionsModel::installFromFolder(const QString& folderPath)
   }
 
   const ManifestMeta meta = parseManifestMeta(path);
+  const QString manifestPath = QDir(path).filePath(QStringLiteral("manifest.json"));
+  const qint64 manifestMtimeMs = QFileInfo(manifestPath).exists() ? QFileInfo(manifestPath).lastModified().toMSecsSinceEpoch() : 0;
 
   const HRESULT hr = m_profile->AddBrowserExtension(
     toWide(path).c_str(),
     Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
-      [this, meta](HRESULT errorCode, ICoreWebView2BrowserExtension* extension) -> HRESULT {
+      [this, meta, path, manifestMtimeMs](HRESULT errorCode, ICoreWebView2BrowserExtension* extension) -> HRESULT {
         QString installedId;
         if (SUCCEEDED(errorCode) && extension) {
           LPWSTR idRaw = nullptr;
@@ -444,7 +505,7 @@ void BrowserExtensionsModel::installFromFolder(const QString& folderPath)
         }
         QMetaObject::invokeMethod(
           this,
-          [this, meta, installedId, errorCode]() {
+          [this, meta, path, manifestMtimeMs, installedId, errorCode]() {
             if (FAILED(errorCode)) {
               setError(QStringLiteral("Failed to install extension: %1").arg(hresultMessage(errorCode)));
               return;
@@ -464,6 +525,14 @@ void BrowserExtensionsModel::installFromFolder(const QString& folderPath)
               }
 
               ExtensionsStore::instance().setMeta(installedId, iconPath, popupUrl, optionsUrl);
+              ExtensionsStore::instance().setManifestMeta(
+                installedId,
+                path,
+                meta.version,
+                meta.description,
+                meta.permissions,
+                meta.hostPermissions,
+                manifestMtimeMs);
             }
 
             clearError();

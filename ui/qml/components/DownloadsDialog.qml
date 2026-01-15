@@ -10,11 +10,17 @@ Item {
 
     signal closeRequested()
 
+    property bool embedded: false
+
     Rectangle {
         id: panel
-        anchors.centerIn: parent
-        width: Math.min(620, parent.width - 80)
-        height: Math.min(480, parent.height - 80)
+        readonly property real preferredWidth: root.embedded ? parent.width : Math.min(620, parent.width - 80)
+        readonly property real preferredHeight: root.embedded ? parent.height : Math.min(480, parent.height - 80)
+
+        width: Math.max(1, Math.round(preferredWidth))
+        height: Math.max(1, Math.round(preferredHeight))
+        x: root.embedded ? 0 : Math.round((parent.width - width) / 2)
+        y: root.embedded ? 0 : Math.round((parent.height - height) / 2)
         radius: theme.cornerRadius
         color: Qt.rgba(1, 1, 1, 0.98)
         border.color: Qt.rgba(0, 0, 0, 0.12)

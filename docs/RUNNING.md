@@ -17,6 +17,15 @@ If you double-click the `.cmd` launchers and something fails, the window will pa
    - Manual (one-time): `scripts\\deploy.cmd` (or `.\scripts\deploy.ps1 -Config Debug`)
 3. Run: `build\\Debug\\xbrowser.exe`
 
+## Profiles & incognito
+
+- Run with a named profile (separate data dir): `.\scripts\run.ps1 -Config Debug -Args @('--profile','dev')`
+- Run in incognito mode (temporary data dir, cleaned on exit): `.\scripts\run.ps1 -Config Debug -Args @('--incognito')`
+
+In-app shortcuts:
+- New window: `Ctrl+N` (starts a new process with a fresh profile id)
+- New incognito window: `Ctrl+Shift+N`
+
 ## Visual Studio
 
 - Open `build\\XBrowser.sln`

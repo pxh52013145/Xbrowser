@@ -6,7 +6,7 @@ Item {
     id: root
     required property var view
 
-    implicitHeight: row.implicitHeight + theme.spacing * 2
+    implicitHeight: layout.implicitHeight + theme.spacing * 2
     visible: root.view && root.view.documentPlayingAudio
 
     Rectangle {
@@ -17,36 +17,40 @@ Item {
         border.width: 1
     }
 
-    RowLayout {
-        id: row
+    ColumnLayout {
+        id: layout
         anchors.fill: parent
         anchors.margins: theme.spacing
-        spacing: theme.spacing
+        spacing: Math.max(6, Math.round(theme.spacing * 0.75))
 
-        Label {
+        Label { text: "Media"; font.bold: true; elide: Text.ElideRight }
+
+        RowLayout {
             Layout.fillWidth: true
-            text: "Media"
-            font.bold: true
-            elide: Text.ElideRight
-        }
+            spacing: theme.spacing
 
-        ToolButton {
-            text: root.view && root.view.muted ? "Unmute" : "Mute"
-            onClicked: root.view.muted = !root.view.muted
-        }
+            ToolButton {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: root.view && root.view.muted ? "Unmute" : "Mute"
+                onClicked: root.view.muted = !root.view.muted
+            }
 
-        ToolButton {
-            text: "Play/Pause"
-            onClicked: {
-                const toggleScript = `
+            ToolButton {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: "Play/Pause"
+                onClicked: {
+                    const toggleScript = `
 (() => {
   const el = document.querySelector('video, audio');
   if (!el) return false;
   if (el.paused) { el.play(); return true; }
   el.pause(); return true;
 })();`
-                root.view.executeScript(toggleScript)
-                toast.showToast("Sent media toggle")
+                    root.view.executeScript(toggleScript)
+                    toast.showToast("Sent media toggle")
+                }
             }
         }
     }

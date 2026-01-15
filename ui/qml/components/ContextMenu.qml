@@ -59,8 +59,8 @@ Rectangle {
 
                     ItemDelegate {
                         anchors.fill: parent
-                        visible: !modelData || !modelData.separator
-                        enabled: modelData && modelData.enabled !== false
+                        visible: !(modelData && modelData.separator)
+                        enabled: modelData ? (modelData.enabled !== false) : false
                         hoverEnabled: visible
 
                         background: Rectangle {

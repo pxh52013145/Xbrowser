@@ -4,9 +4,14 @@ qt_add_executable(xbrowser
   core/AppPaths.cpp
   core/AppSettings.cpp
   core/BrowserController.cpp
+  core/BookmarksFilterModel.cpp
+  core/BookmarksStore.cpp
   core/CommandBus.cpp
+  core/DiagnosticsController.cpp
   core/DownloadModel.cpp
   core/ExtensionsStore.cpp
+  core/HistoryFilterModel.cpp
+  core/HistoryStore.cpp
   core/ModsModel.cpp
   core/NotificationCenter.cpp
   core/QuickLinksModel.cpp
@@ -16,6 +21,8 @@ qt_add_executable(xbrowser
   core/TabFilterModel.cpp
   core/TabGroupModel.cpp
   core/TabModel.cpp
+  core/TabSwitcherModel.cpp
+  core/ShortcutStore.cpp
   core/ThemeController.cpp
   core/ThemePackModel.cpp
   core/ToastController.cpp
@@ -77,6 +84,7 @@ if(WIN32)
           $<$<CONFIG:Debug>:--debug>
           --force
           --no-translations
+          --compiler-runtime
           --qmldir "${CMAKE_SOURCE_DIR}/ui/qml"
           "$<TARGET_FILE:xbrowser>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
