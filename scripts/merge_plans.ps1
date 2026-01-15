@@ -97,10 +97,15 @@ function Write-Csv([string]$Path, $Rows, $SchemaRow) {
 $repoRoot = Get-RepoRoot
 
 if ([string]::IsNullOrWhiteSpace($ReferenceDir)) {
-  $ReferenceDir = Join-Path $repoRoot "reference"
+  $logsDir = Join-Path $repoRoot "reference\\logs"
+  if (Test-Path $logsDir) {
+    $ReferenceDir = $logsDir
+  } else {
+    $ReferenceDir = Join-Path $repoRoot "reference"
+  }
 }
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
-  $OutDir = $ReferenceDir
+  $OutDir = Join-Path $repoRoot "reference"
 }
 
 if (!(Test-Path $ReferenceDir)) {

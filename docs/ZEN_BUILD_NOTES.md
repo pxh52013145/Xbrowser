@@ -1,6 +1,6 @@
 # Zen Build/Packaging Notes (XBrowser)
 
-This file closes the “build/packaging” reference items in `reference/zen_browser_feature_impl_plan.csv` that are **Zen-specific** (Firefox build system) but still useful when porting ideas to XBrowser.
+This file closes the “build/packaging” reference items in `reference/logs/zen_browser_feature_impl_plan.csv` that are **Zen-specific** (Firefox build system) but still useful when porting ideas to XBrowser.
 
 ## ZEN-001 — Build integration via `moz.build`
 
@@ -27,4 +27,3 @@ XBrowser equivalent:
 
 - UI assets live in QML/QRC (`ui/qml/**`, `ui/ui.qrc`).
 - “Mods/Themes” are applied via runtime theme tokens (`src/core/ThemePackModel.*`, `src/core/ThemeController.*`), not via `browser.jar`.
-

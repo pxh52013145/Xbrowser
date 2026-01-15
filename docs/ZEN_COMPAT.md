@@ -34,7 +34,7 @@ If multi-window is needed later:
 - Decide ownership model (one shared workspace store vs per-window stores).
 - Add an explicit sync layer (e.g. file watcher + conflict resolution or IPC).
 - Avoid tight coupling between windows by syncing through a versioned state model instead of direct object pointers.
-- See also: `reference/zen_browser_next_plan_v4.csv` (Windows/multi-window/profile roadmap).
+- See also: `reference/logs/zen_browser_next_plan_v4.csv` (Windows/multi-window/profile roadmap).
 
 ## Native Share / Haptics (ZEN-200)
 
