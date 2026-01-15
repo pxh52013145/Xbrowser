@@ -8,6 +8,7 @@ Implemented in XBrowser:
 
 - In-app tab drag to reorder (QML `DragHandler` + `DropArea` -> `BrowserController::moveTabBefore`).
 - In-app drag-to-split dropzones (QML dropzones + `SplitViewController`).
+- “Airspace-safe” popups/overlays (top-level `Window`) so WebView2 doesn’t cover drop UI.
 
 Not implemented (by design, would require native work):
 
@@ -25,7 +26,7 @@ If needed later, add a Windows-native drag bridge that can:
 
 Current state:
 
-- Single window only.
+- Single window only (by design for now).
 - Session persistence is file-based (`session.json`) with debounced writes.
 
 If multi-window is needed later:
@@ -33,9 +34,9 @@ If multi-window is needed later:
 - Decide ownership model (one shared workspace store vs per-window stores).
 - Add an explicit sync layer (e.g. file watcher + conflict resolution or IPC).
 - Avoid tight coupling between windows by syncing through a versioned state model instead of direct object pointers.
+- See also: `reference/zen_browser_next_plan_v4.csv` (Windows/multi-window/profile roadmap).
 
 ## Native Share / Haptics (ZEN-200)
 
 - Share is implemented as `share-url` via `mailto:` fallback to clipboard.
 - Haptics are not implemented (Windows desktop doesn’t provide a universal haptics API comparable to mobile).
-
