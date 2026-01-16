@@ -176,7 +176,14 @@ if ($resolvedDevelopingDir -and (Test-Path $resolvedDevelopingDir)) {
 }
 
 foreach ($file in $inputFiles) {
-  $kind = if ($resolvedDevelopingDir -and (Test-Path $resolvedDevelopingDir) -and ($file.FullName -like "$resolvedDevelopingDir*")) { "developing" } else { "logs" }
+  $kind = "logs"
+  if ($resolvedDevelopingDir -and (Test-Path $resolvedDevelopingDir)) {
+    $developingPrefix = [System.IO.Path]::GetFullPath($resolvedDevelopingDir).TrimEnd('\') + '\'
+    $filePath = [System.IO.Path]::GetFullPath($file.FullName)
+    if ($filePath.StartsWith($developingPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $kind = "developing"
+    }
+  }
   $sourceCsv = if ($kind -eq "developing") { "developing/$($file.Name)" } else { "logs/$($file.Name)" }
 
   $rows = Read-PlanCsv -CsvPath $file.FullName -SourceCsv $sourceCsv -SourceKind $kind -IncludeLayout:$IncludeLayout

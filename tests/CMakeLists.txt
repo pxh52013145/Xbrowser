@@ -121,3 +121,8 @@ xbrowser_add_test(xbrowser_test_shortcut_store
   TestShortcutStore.cpp
   ../src/core/ShortcutStore.cpp
 )
+
+xbrowser_add_test(xbrowser_test_webpanels
+  TestWebPanelsStore.cpp
+  ../src/core/WebPanelsStore.cpp
+)

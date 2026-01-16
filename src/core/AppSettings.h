@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QUrl>
 
 class AppSettings : public QObject
 {
@@ -22,6 +23,10 @@ class AppSettings : public QObject
   Q_PROPERTY(
     bool closeTabOnBackNoHistory READ closeTabOnBackNoHistory WRITE setCloseTabOnBackNoHistory NOTIFY
       closeTabOnBackNoHistoryChanged)
+  Q_PROPERTY(int webPanelWidth READ webPanelWidth WRITE setWebPanelWidth NOTIFY webPanelWidthChanged)
+  Q_PROPERTY(bool webPanelVisible READ webPanelVisible WRITE setWebPanelVisible NOTIFY webPanelVisibleChanged)
+  Q_PROPERTY(QUrl webPanelUrl READ webPanelUrl WRITE setWebPanelUrl NOTIFY webPanelUrlChanged)
+  Q_PROPERTY(QString webPanelTitle READ webPanelTitle WRITE setWebPanelTitle NOTIFY webPanelTitleChanged)
 
 public:
   explicit AppSettings(QObject* parent = nullptr);
@@ -59,6 +64,18 @@ public:
   bool closeTabOnBackNoHistory() const;
   void setCloseTabOnBackNoHistory(bool enabled);
 
+  int webPanelWidth() const;
+  void setWebPanelWidth(int width);
+
+  bool webPanelVisible() const;
+  void setWebPanelVisible(bool visible);
+
+  QUrl webPanelUrl() const;
+  void setWebPanelUrl(const QUrl& url);
+
+  QString webPanelTitle() const;
+  void setWebPanelTitle(const QString& title);
+
 signals:
   void sidebarWidthChanged();
   void sidebarExpandedChanged();
@@ -71,6 +88,10 @@ signals:
   void onboardingSeenChanged();
   void showMenuBarChanged();
   void closeTabOnBackNoHistoryChanged();
+  void webPanelWidthChanged();
+  void webPanelVisibleChanged();
+  void webPanelUrlChanged();
+  void webPanelTitleChanged();
 
 private:
   void load();
@@ -88,5 +109,9 @@ private:
   bool m_onboardingSeen = false;
   bool m_showMenuBar = false;
   bool m_closeTabOnBackNoHistory = true;
+  int m_webPanelWidth = 360;
+  bool m_webPanelVisible = false;
+  QUrl m_webPanelUrl = QUrl(QStringLiteral("about:blank"));
+  QString m_webPanelTitle;
   QTimer m_saveTimer;
 };

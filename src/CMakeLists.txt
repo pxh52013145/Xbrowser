@@ -26,6 +26,7 @@ qt_add_executable(xbrowser
   core/ThemeController.cpp
   core/ThemePackModel.cpp
   core/ToastController.cpp
+  core/WebPanelsStore.cpp
   core/WorkspaceModel.cpp
   engine/webview2/WebView2View.cpp
   engine/webview2/BrowserExtensionsModel.cpp

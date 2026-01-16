@@ -92,14 +92,16 @@ Item {
         closing = false
     }
 
-    function openAtItem(component, anchorItem, constrainItem) {
+    function openAtItem(component, anchorItem, constrainItem, anchorX, anchorY) {
         if (!component || !anchorItem) {
             return
         }
 
         close()
         popupLoader.sourceComponent = component
-        const pos = anchorItem.mapToItem(root, 0, anchorItem.height)
+        const ax = (anchorX !== undefined && anchorX !== null) ? anchorX : 0
+        const ay = (anchorY !== undefined && anchorY !== null) ? anchorY : anchorItem.height
+        const pos = anchorItem.mapToItem(root, ax, ay)
         pendingX = pos.x
         pendingY = pos.y
         pendingRect = constrainRectForItem(constrainItem)

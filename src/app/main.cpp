@@ -33,6 +33,7 @@
 #include "../core/ModsModel.h"
 #include "../core/NotificationCenter.h"
 #include "../core/QuickLinksModel.h"
+#include "../core/WebPanelsStore.h"
 #include "../core/ShortcutStore.h"
 #include "../core/SessionStore.h"
 #include "../core/SitePermissionsStore.h"
@@ -341,6 +342,7 @@ int main(int argc, char* argv[])
   DownloadModel downloads;
   BookmarksStore bookmarks;
   HistoryStore history;
+  WebPanelsStore webPanels;
   ModsModel mods;
   ThemeController theme;
   theme.setWorkspaces(browser.workspaces());
@@ -656,6 +658,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("downloads", &downloads);
   engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
   engine.rootContext()->setContextProperty("history", &history);
+  engine.rootContext()->setContextProperty("webPanels", &webPanels);
   engine.rootContext()->setContextProperty("mods", &mods);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("themes", &themes);

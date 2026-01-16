@@ -196,6 +196,69 @@ void AppSettings::setCloseTabOnBackNoHistory(bool enabled)
   scheduleSave();
 }
 
+int AppSettings::webPanelWidth() const
+{
+  return m_webPanelWidth;
+}
+
+void AppSettings::setWebPanelWidth(int width)
+{
+  const int clamped = qBound(220, width, 720);
+  if (m_webPanelWidth == clamped) {
+    return;
+  }
+  m_webPanelWidth = clamped;
+  emit webPanelWidthChanged();
+  scheduleSave();
+}
+
+bool AppSettings::webPanelVisible() const
+{
+  return m_webPanelVisible;
+}
+
+void AppSettings::setWebPanelVisible(bool visible)
+{
+  if (m_webPanelVisible == visible) {
+    return;
+  }
+  m_webPanelVisible = visible;
+  emit webPanelVisibleChanged();
+  scheduleSave();
+}
+
+QUrl AppSettings::webPanelUrl() const
+{
+  return m_webPanelUrl;
+}
+
+void AppSettings::setWebPanelUrl(const QUrl& url)
+{
+  const QUrl normalized = url.isEmpty() ? QUrl(QStringLiteral("about:blank")) : url;
+  if (m_webPanelUrl == normalized) {
+    return;
+  }
+  m_webPanelUrl = normalized;
+  emit webPanelUrlChanged();
+  scheduleSave();
+}
+
+QString AppSettings::webPanelTitle() const
+{
+  return m_webPanelTitle;
+}
+
+void AppSettings::setWebPanelTitle(const QString& title)
+{
+  const QString trimmed = title.trimmed();
+  if (m_webPanelTitle == trimmed) {
+    return;
+  }
+  m_webPanelTitle = trimmed;
+  emit webPanelTitleChanged();
+  scheduleSave();
+}
+
 void AppSettings::load()
 {
   QFile f(settingsPath());
@@ -213,7 +276,7 @@ void AppSettings::load()
   const QJsonObject obj = doc.object();
 
   const int version = obj.value("version").toInt(1);
-  const bool needsUpgrade = version < 3;
+  const bool needsUpgrade = version < 5;
 
   const int width = obj.value("sidebarWidth").toInt(m_sidebarWidth);
   m_sidebarWidth = qBound(160, width, 520);
@@ -230,6 +293,19 @@ void AppSettings::load()
   m_onboardingSeen = obj.value("onboardingSeen").toBool(m_onboardingSeen);
   m_showMenuBar = obj.value("showMenuBar").toBool(m_showMenuBar);
   m_closeTabOnBackNoHistory = obj.value("closeTabOnBackNoHistory").toBool(m_closeTabOnBackNoHistory);
+
+  const int panelWidth = obj.value("webPanelWidth").toInt(m_webPanelWidth);
+  m_webPanelWidth = qBound(220, panelWidth, 720);
+  m_webPanelVisible = obj.value("webPanelVisible").toBool(m_webPanelVisible);
+
+  const QString panelUrlText = obj.value("webPanelUrl").toString().trimmed();
+  if (!panelUrlText.isEmpty()) {
+    const QUrl loadedUrl(panelUrlText);
+    if (loadedUrl.isValid() && !loadedUrl.isEmpty()) {
+      m_webPanelUrl = loadedUrl;
+    }
+  }
+  m_webPanelTitle = obj.value("webPanelTitle").toString(m_webPanelTitle).trimmed();
 
   if (needsUpgrade) {
     scheduleSave();
@@ -252,7 +328,7 @@ bool AppSettings::saveNow(QString* error) const
   }
 
   QJsonObject obj;
-  obj.insert("version", 3);
+  obj.insert("version", 5);
   obj.insert("sidebarWidth", m_sidebarWidth);
   obj.insert("sidebarExpanded", m_sidebarExpanded);
   obj.insert("addressBarVisible", m_addressBarVisible);
@@ -264,6 +340,10 @@ bool AppSettings::saveNow(QString* error) const
   obj.insert("onboardingSeen", m_onboardingSeen);
   obj.insert("showMenuBar", m_showMenuBar);
   obj.insert("closeTabOnBackNoHistory", m_closeTabOnBackNoHistory);
+  obj.insert("webPanelWidth", m_webPanelWidth);
+  obj.insert("webPanelVisible", m_webPanelVisible);
+  obj.insert("webPanelUrl", m_webPanelUrl.toString());
+  obj.insert("webPanelTitle", m_webPanelTitle);
 
   f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
   if (!f.commit()) {

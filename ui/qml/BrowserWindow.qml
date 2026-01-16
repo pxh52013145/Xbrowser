@@ -116,11 +116,15 @@ ApplicationWindow {
     property string extensionPopupUrl: ""
     property string extensionPopupOptionsUrl: ""
 
+    property url webPanelUrl: "about:blank"
+    property string webPanelTitle: ""
+
     readonly property var browserModel: browser
     readonly property var notificationsModel: notifications
     readonly property var downloadsModel: downloads
     readonly property var bookmarksModel: bookmarks
     readonly property var historyModel: history
+    readonly property var webPanelsModel: webPanels
     readonly property var themesModel: themes
     readonly property var modsModel: mods
 
@@ -483,8 +487,36 @@ ApplicationWindow {
             return
         }
 
-        popupManager.openAtItem(component, anchorItem)
+        const anchorPos = anchorItem.mapToItem(popupManager, 0, 0)
+        const sidebarPos = sidebarPane ? sidebarPane.mapToItem(popupManager, sidebarPane.width, 0) : ({ x: 0, y: 0 })
+        const gap = 8
+        const ax = Math.max(0, Math.round((sidebarPos.x + gap) - anchorPos.x))
+        popupManager.openAtItem(component, anchorItem, null, ax, anchorItem.height)
         root.popupManagerContext = ctx
+    }
+
+    function openWebPanel(url, title) {
+        if (!url) {
+            return
+        }
+        const urlText = url.toString ? url.toString() : String(url || "")
+        if (!urlText || urlText.length === 0 || urlText === "about:blank") {
+            return
+        }
+
+        root.webPanelUrl = url
+        root.webPanelTitle = String(title || "")
+        browser.settings.webPanelVisible = true
+        browser.settings.webPanelUrl = url
+        browser.settings.webPanelTitle = root.webPanelTitle
+
+        if (webPanelWeb && webPanelWeb.navigate) {
+            webPanelWeb.navigate(url)
+        }
+    }
+
+    function closeWebPanel() {
+        browser.settings.webPanelVisible = false
     }
 
     function buildExtensionContextMenuItems(extensionId, name, enabled, pinned, popupUrl, optionsUrl) {
@@ -2085,6 +2117,17 @@ ApplicationWindow {
   `
         root.glanceScript = glanceScript
 
+        root.webPanelUrl = browser.settings.webPanelUrl
+        root.webPanelTitle = browser.settings.webPanelTitle
+        if (browser.settings.webPanelVisible
+                && root.webPanelUrl
+                && root.webPanelUrl.toString().length > 0
+                && root.webPanelUrl.toString() !== "about:blank"
+                && webPanelWeb
+                && webPanelWeb.navigate) {
+            webPanelWeb.navigate(root.webPanelUrl)
+        }
+
         if (splitView) {
             splitView.enabledChanged.connect(syncSplitViews)
             splitView.tabsChanged.connect(syncSplitViews)
@@ -2882,6 +2925,22 @@ ApplicationWindow {
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
                         ToolTip.text: "Downloads"
+                    }
+
+                    ToolButton {
+                        id: sidebarPanelsButton
+                        text: root.sidebarIconOnly ? "P" : "Panels"
+                        enabled: root.webPanelsModel !== null && root.webPanelsModel !== undefined
+                        onClicked: root.toggleSidebarToolPopup("panels", sidebarPanelsPopupComponent, sidebarPanelsButton)
+                        background: Rectangle {
+                            radius: 8
+                            color: buttonColor(root.popupManagerContext === "sidebar-tool-panels")
+                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-panels")
+                            border.width: 1
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Panels"
                     }
 
                     ToolButton {
@@ -4914,6 +4973,127 @@ ApplicationWindow {
                 }
             }
         }
+
+        Rectangle {
+            Layout.preferredWidth: 4
+            Layout.fillHeight: true
+            visible: browser.settings.webPanelVisible
+            color: Qt.rgba(0, 0, 0, 0)
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.SplitHCursor
+                hoverEnabled: true
+                preventStealing: true
+
+                property real startSceneX: 0
+                property int startWidth: 0
+
+                onPressed: (mouse) => {
+                    startSceneX = mouse.sceneX
+                    startWidth = browser.settings.webPanelWidth
+                }
+
+                onDoubleClicked: browser.settings.webPanelWidth = 360
+
+                onPositionChanged: (mouse) => {
+                    if (!pressed) {
+                        return
+                    }
+                    browser.settings.webPanelWidth = startWidth - Math.round(mouse.sceneX - startSceneX)
+                }
+            }
+        }
+
+        Rectangle {
+            id: webPanelPane
+            Layout.preferredWidth: browser.settings.webPanelVisible ? browser.settings.webPanelWidth : 0
+            Layout.fillHeight: true
+            visible: true
+            opacity: browser.settings.webPanelVisible ? 1.0 : 0.0
+            clip: true
+            color: Qt.rgba(0, 0, 0, 0.03)
+
+            Behavior on Layout.preferredWidth {
+                NumberAnimation {
+                    duration: browser.settings.reduceMotion ? 0 : theme.motionNormalMs
+                    easing.type: Easing.InOutCubic
+                }
+            }
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 34
+                    color: Qt.rgba(1, 1, 1, 0.92)
+                    border.color: Qt.rgba(0, 0, 0, 0.08)
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.webPanelTitle && root.webPanelTitle.length > 0
+                                      ? root.webPanelTitle
+                                      : (root.webPanelUrl && root.webPanelUrl.toString().length > 0 ? root.webPanelUrl.toString() : "Panel")
+                            elide: Text.ElideRight
+                        }
+
+                        ToolButton {
+                            text: "Open tab"
+                            enabled: root.webPanelUrl && root.webPanelUrl.toString().length > 0 && root.webPanelUrl.toString() !== "about:blank"
+                            onClicked: commands.invoke("new-tab", { url: root.webPanelUrl })
+                        }
+
+                        ToolButton {
+                            text: "×"
+                            onClicked: root.closeWebPanel()
+                        }
+                    }
+                }
+
+                WebView2View {
+                    id: webPanelWeb
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Component.onCompleted: {
+                        if (root.webPanelUrl && root.webPanelUrl.toString().length > 0 && root.webPanelUrl.toString() !== "about:blank") {
+                            navigate(root.webPanelUrl)
+                        }
+                    }
+
+                    onCurrentUrlChanged: {
+                        if (!currentUrl || currentUrl.toString().length === 0 || currentUrl.toString() === "about:blank") {
+                            return
+                        }
+                        root.webPanelUrl = currentUrl
+                        browser.settings.webPanelUrl = currentUrl
+                    }
+
+                    onTitleChanged: {
+                        if (!currentUrl || currentUrl.toString().length === 0 || currentUrl.toString() === "about:blank") {
+                            return
+                        }
+                        root.webPanelTitle = title
+                        browser.settings.webPanelTitle = title
+                    }
+                }
+            }
+        }
     }
 
     OverlayHost {
@@ -5281,6 +5461,29 @@ ApplicationWindow {
                 downloads: root.downloadsModel
                 embedded: true
                 onCloseRequested: popupManager.close()
+            }
+        }
+    }
+
+    Component {
+        id: sidebarPanelsPopupComponent
+
+        Item {
+            property int maxHeight: 0
+            implicitWidth: 520
+            implicitHeight: maxHeight > 0 ? Math.min(560, maxHeight) : 560
+
+            WebPanelsDialog {
+                anchors.fill: parent
+                panels: root.webPanelsModel
+                embedded: true
+                currentUrl: root.focusedView ? root.focusedView.currentUrl : "about:blank"
+                currentTitle: root.focusedView ? root.focusedView.title : ""
+                onCloseRequested: popupManager.close()
+                onOpenRequested: (url, title) => {
+                    popupManager.close()
+                    root.openWebPanel(url, title)
+                }
             }
         }
     }
