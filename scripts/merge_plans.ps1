@@ -1,5 +1,6 @@
 param(
   [string]$ReferenceDir = "",
+  [string]$DevelopingDir = "",
   [string]$OutDir = "",
   [switch]$IncludeLayout
 )
@@ -25,7 +26,7 @@ function Get-PriorityKey([string]$Priority) {
   }
 }
 
-function Normalize-Row($Row, [string]$SourceCsv) {
+function Normalize-Row($Row, [string]$SourceCsv, [string]$SourceKind) {
   $area = $Row.Area
   if ([string]::IsNullOrWhiteSpace($area)) {
     $area = $Row.Category
@@ -73,6 +74,7 @@ function Normalize-Row($Row, [string]$SourceCsv) {
     Done_Criteria  = [string]$Row.Done_Criteria
     Test_Steps     = [string]$Row.Test_Steps
     SourceCsv      = $SourceCsv
+    SourceKind     = $SourceKind
   }
 
   return $obj
@@ -94,82 +96,113 @@ function Write-Csv([string]$Path, $Rows, $SchemaRow) {
   [System.IO.File]::WriteAllText($Path, ($header + "`r`n"), $utf8Bom)
 }
 
-$repoRoot = Get-RepoRoot
-
-if ([string]::IsNullOrWhiteSpace($ReferenceDir)) {
-  $logsDir = Join-Path $repoRoot "reference\\logs"
-  if (Test-Path $logsDir) {
-    $ReferenceDir = $logsDir
-  } else {
-    $ReferenceDir = Join-Path $repoRoot "reference"
+function Resolve-PathFromRepo([string]$RepoRoot, [string]$PathValue) {
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $null
   }
-}
-if ([string]::IsNullOrWhiteSpace($OutDir)) {
-  $OutDir = Join-Path $repoRoot "reference"
-}
-
-if (!(Test-Path $ReferenceDir)) {
-  throw "Reference dir not found: $ReferenceDir"
-}
-if (!(Test-Path $OutDir)) {
-  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-}
-
-$planFiles = @(
-  "zen_browser_feature_impl_plan.csv",
-  "zen_browser_interaction_plan.csv",
-  "zen_browser_interaction_plan_v2.csv",
-  "zen_browser_interaction_plan_v3.csv",
-  "zen_browser_next_plan_v4.csv"
-)
-
-$layoutFiles = @("zen_browser_feature_layout.csv")
-
-$recordsById = @{}
-
-foreach ($name in $planFiles) {
-  $path = Join-Path $ReferenceDir $name
-  if (!(Test-Path $path)) {
-    Write-Warning "Missing: $path"
-    continue
+  if ([System.IO.Path]::IsPathRooted($PathValue)) {
+    return $PathValue
   }
-  $rows = Import-Csv -Path $path
+  return (Join-Path $RepoRoot $PathValue)
+}
+
+function Read-PlanCsv([string]$CsvPath, [string]$SourceCsv, [string]$SourceKind, [switch]$IncludeLayout) {
+  $rows = $null
+  try {
+    $rows = Import-Csv -Path $CsvPath
+  } catch {
+    Write-Warning "Failed to parse CSV: $CsvPath ($($_.Exception.Message))"
+    return @()
+  }
+
+  if (!$rows -or @($rows).Count -eq 0) {
+    return @()
+  }
+
+  $props = @($rows[0].PSObject.Properties.Name)
+  $hasStatus = $props -contains "Status"
+  $isLayout = ($props -contains "Category") -and ($props -contains "Feature") -and (-not $hasStatus)
+
+  if (-not $hasStatus -and -not ($IncludeLayout -and $isLayout)) {
+    return @()
+  }
+
+  $out = @()
   foreach ($row in $rows) {
     if (-not $row.ID) {
       continue
     }
-    $rec = Normalize-Row $row $name
+    $out += (Normalize-Row $row $SourceCsv $SourceKind)
+  }
+  return $out
+}
+
+$repoRoot = Get-RepoRoot
+
+if ([string]::IsNullOrWhiteSpace($ReferenceDir)) {
+  $ReferenceDir = (Join-Path $repoRoot "reference\\logs")
+}
+
+$resolvedLogsDir = Resolve-PathFromRepo $repoRoot $ReferenceDir
+if (!$resolvedLogsDir) {
+  throw "Logs dir not set."
+}
+if (!(Test-Path $resolvedLogsDir)) {
+  throw "Logs dir not found: $resolvedLogsDir"
+}
+
+if ([string]::IsNullOrWhiteSpace($DevelopingDir)) {
+  $DevelopingDir = (Join-Path $repoRoot "reference\\developing")
+}
+$resolvedDevelopingDir = Resolve-PathFromRepo $repoRoot $DevelopingDir
+
+if ([string]::IsNullOrWhiteSpace($OutDir)) {
+  $OutDir = (Join-Path $repoRoot "reference")
+}
+$resolvedOutDir = Resolve-PathFromRepo $repoRoot $OutDir
+if (!$resolvedOutDir) {
+  throw "Out dir not set."
+}
+if (!(Test-Path $resolvedOutDir)) {
+  New-Item -ItemType Directory -Force -Path $resolvedOutDir | Out-Null
+}
+
+$recordsById = @{}
+
+$inputFiles = @()
+$inputFiles += Get-ChildItem -Path $resolvedLogsDir -Filter "*.csv" -File | Where-Object { $_.Name -notlike "zen_browser_merged_*" }
+if ($resolvedDevelopingDir -and (Test-Path $resolvedDevelopingDir)) {
+  $inputFiles += Get-ChildItem -Path $resolvedDevelopingDir -Filter "*.csv" -File | Where-Object { $_.Name -notlike "zen_browser_merged_*" }
+}
+
+foreach ($file in $inputFiles) {
+  $kind = if ($resolvedDevelopingDir -and (Test-Path $resolvedDevelopingDir) -and ($file.FullName -like "$resolvedDevelopingDir*")) { "developing" } else { "logs" }
+  $sourceCsv = if ($kind -eq "developing") { "developing/$($file.Name)" } else { "logs/$($file.Name)" }
+
+  $rows = Read-PlanCsv -CsvPath $file.FullName -SourceCsv $sourceCsv -SourceKind $kind -IncludeLayout:$IncludeLayout
+  foreach ($rec in $rows) {
+    if (-not $rec.ID) {
+      continue
+    }
+
     if (-not $recordsById.ContainsKey($rec.ID)) {
       $recordsById[$rec.ID] = $rec
       continue
     }
 
     $existing = $recordsById[$rec.ID]
-    $existingHasStatus = -not [string]::IsNullOrWhiteSpace($existing.Status)
-    $recHasStatus = -not [string]::IsNullOrWhiteSpace($rec.Status)
-
-    if (-not $existingHasStatus -and $recHasStatus) {
+    if ($rec.SourceKind -eq "developing" -and $existing.SourceKind -ne "developing") {
       $recordsById[$rec.ID] = $rec
-    }
-  }
-}
-
-if ($IncludeLayout) {
-  foreach ($name in $layoutFiles) {
-    $path = Join-Path $ReferenceDir $name
-    if (!(Test-Path $path)) {
-      Write-Warning "Missing: $path"
       continue
     }
-    $rows = Import-Csv -Path $path
-    foreach ($row in $rows) {
-      if (-not $row.ID) {
-        continue
-      }
-      if ($recordsById.ContainsKey([string]$row.ID)) {
-        continue
-      }
-      $rec = Normalize-Row $row $name
+
+    if ($rec.SourceKind -ne $existing.SourceKind) {
+      continue
+    }
+
+    $existingHasStatus = -not [string]::IsNullOrWhiteSpace($existing.Status)
+    $recHasStatus = -not [string]::IsNullOrWhiteSpace($rec.Status)
+    if (-not $existingHasStatus -and $recHasStatus) {
       $recordsById[$rec.ID] = $rec
     }
   }
@@ -185,10 +218,11 @@ $sorted = $all | Sort-Object `
 $developed = $sorted | Where-Object { $_.Bucket -eq "developed" }
 $developing = $sorted | Where-Object { $_.Bucket -eq "developing" }
 
-$outAll = Join-Path $OutDir "zen_browser_merged_all.csv"
-$outDeveloped = Join-Path $OutDir "zen_browser_merged_developed.csv"
-$outDeveloping = Join-Path $OutDir "zen_browser_merged_developing.csv"
-$outCounts = Join-Path $OutDir "zen_browser_merged_counts_by_area.csv"
+$outAll = Join-Path $resolvedOutDir "zen_browser_merged_all.csv"
+$outDeveloped = Join-Path $resolvedOutDir "zen_browser_merged_developed.csv"
+$outDeveloping = Join-Path $resolvedOutDir "zen_browser_merged_developing.csv"
+$outCounts = Join-Path $resolvedOutDir "zen_browser_merged_counts_by_area.csv"
+$outAreas = Join-Path $resolvedOutDir "zen_browser_merged_areas.csv"
 
 $schema = $sorted | Select-Object -First 1
 Write-Csv -Path $outAll -Rows $sorted -SchemaRow $schema
@@ -205,8 +239,22 @@ $counts = $sorted | Group-Object -Property Bucket, Area | Sort-Object Name | For
 }
 $counts | Export-Csv -Path $outCounts -NoTypeInformation -Encoding UTF8
 
+$areas = $sorted | Group-Object -Property Area | Sort-Object Name | ForEach-Object {
+  $areaName = $_.Name
+  $doneCount = @($developed | Where-Object { $_.Area -eq $areaName }).Count
+  $todoCount = @($developing | Where-Object { $_.Area -eq $areaName }).Count
+  [PSCustomObject]@{
+    Area = $areaName
+    Total = $_.Count
+    Developed = $doneCount
+    Developing = $todoCount
+  }
+}
+$areas | Export-Csv -Path $outAreas -NoTypeInformation -Encoding UTF8
+
 Write-Host "Merged: $($sorted.Count) total" -ForegroundColor Green
 Write-Host "  Developed : $($developed.Count) -> $outDeveloped" -ForegroundColor Cyan
 Write-Host "  Developing: $($developing.Count) -> $outDeveloping" -ForegroundColor Cyan
 Write-Host "  All       : $outAll" -ForegroundColor Cyan
 Write-Host "  Counts    : $outCounts" -ForegroundColor Cyan
+Write-Host "  Areas     : $outAreas" -ForegroundColor Cyan
