@@ -6033,6 +6033,7 @@ ApplicationWindow {
         SettingsDialog {
             settings: root.browserModel.settings
             themes: root.themesModel
+            bookmarks: root.bookmarksModel
             onCloseRequested: overlayHost.hide()
         }
     }

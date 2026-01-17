@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt.labs.platform
 
 Item {
     id: root
@@ -8,15 +9,103 @@ Item {
 
     required property var settings
     required property var themes
+    required property var bookmarks
 
     signal closeRequested()
 
     property int currentIndex: 0
+    property string pendingImportPath: ""
+
+    function dialogPath(url) {
+        if (!url) {
+            return ""
+        }
+        const s = url.toString()
+        if (!s || s.length === 0) {
+            return ""
+        }
+        return s.startsWith("file:") ? url.toLocalFile() : s
+    }
+
+    function doExportBookmarks(path) {
+        if (!root.bookmarks) {
+            toast.showToast("Bookmarks not available")
+            return
+        }
+        const ok = root.bookmarks.exportToHtml(path)
+        if (ok) {
+            toast.showToast("Exported bookmarks")
+            return
+        }
+        const err = root.bookmarks.lastError || ""
+        toast.showToast(err.length > 0 ? ("Export failed: " + err) : "Export failed")
+    }
+
+    function doImportBookmarks(path) {
+        if (!root.bookmarks) {
+            toast.showToast("Bookmarks not available")
+            return
+        }
+        const ok = root.bookmarks.importFromHtml(path)
+        if (ok) {
+            toast.showToast("Imported bookmarks")
+            return
+        }
+        const err = root.bookmarks.lastError || ""
+        toast.showToast(err.length > 0 ? ("Import failed: " + err) : "Import failed")
+    }
+
+    FileDialog {
+        id: importBookmarksDialog
+        title: "Import Bookmarks"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Bookmarks HTML (*.html *.htm)", "All files (*)"]
+        onAccepted: {
+            root.pendingImportPath = root.dialogPath(importBookmarksDialog.file)
+            if (root.pendingImportPath.length > 0) {
+                importBookmarksConfirm.open()
+            }
+        }
+    }
+
+    Dialog {
+        id: importBookmarksConfirm
+        modal: true
+        title: "Import bookmarks"
+        standardButtons: Dialog.Cancel | Dialog.Ok
+        onAccepted: root.doImportBookmarks(root.pendingImportPath)
+
+        contentItem: ColumnLayout {
+            width: 420
+            spacing: theme.spacing
+
+            Label {
+                Layout.fillWidth: true
+                text: "Importing will replace your current bookmarks."
+                wrapMode: Text.Wrap
+                opacity: 0.85
+            }
+        }
+    }
+
+    FileDialog {
+        id: exportBookmarksDialog
+        title: "Export Bookmarks"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Bookmarks HTML (*.html)", "All files (*)"]
+        onAccepted: {
+            const path = root.dialogPath(exportBookmarksDialog.file)
+            if (path.length > 0) {
+                root.doExportBookmarks(path)
+            }
+        }
+    }
 
     readonly property var sections: [
         { title: "Appearance" },
         { title: "Running" },
         { title: "Privacy" },
+        { title: "Bookmarks" },
         { title: "Shortcuts" },
         { title: "About" },
     ]
@@ -328,6 +417,52 @@ Item {
                                 Button {
                                     text: "Clear browsing dataâ€¦"
                                     onClicked: commands.invoke("open-clear-data")
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
+                    }
+
+                    // Bookmarks
+                    Flickable {
+                        clip: true
+                        contentWidth: width
+                        contentHeight: bookmarksColumn.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+                        interactive: contentHeight > height
+
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: bookmarksColumn
+                            width: parent.width
+                            spacing: theme.spacing
+
+                            Label { text: "Bookmarks"; font.bold: true; font.pixelSize: 14 }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Export or import bookmarks using the standard Netscape HTML format."
+                                wrapMode: Text.Wrap
+                                opacity: 0.8
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Button {
+                                    text: "Import"
+                                    enabled: !!root.bookmarks
+                                    onClicked: importBookmarksDialog.open()
+                                }
+
+                                Button {
+                                    text: "Export"
+                                    enabled: !!root.bookmarks
+                                    onClicked: exportBookmarksDialog.open()
                                 }
 
                                 Item { Layout.fillWidth: true }

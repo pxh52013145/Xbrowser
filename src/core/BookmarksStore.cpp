@@ -7,8 +7,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QStringConverter>
+#include <QTextStream>
 
 #include <algorithm>
 
@@ -19,6 +22,26 @@ constexpr int kBookmarksVersion = 2;
 QString storagePath()
 {
   return QDir(xbrowser::appDataRoot()).filePath(QStringLiteral("bookmarks.json"));
+}
+
+QString normalizeUserFilePath(const QString& input)
+{
+  QString trimmed = input.trimmed();
+  if (trimmed.isEmpty()) {
+    return {};
+  }
+
+  if (trimmed.startsWith(QStringLiteral("file:"), Qt::CaseInsensitive)) {
+    const QUrl url(trimmed);
+    if (url.isValid() && url.isLocalFile()) {
+      const QString local = url.toLocalFile();
+      if (!local.trimmed().isEmpty()) {
+        return local;
+      }
+    }
+  }
+
+  return trimmed;
 }
 
 QString normalizeFolderTitle(const QString& title)
@@ -35,6 +58,172 @@ QString normalizeBookmarkTitle(const QString& title, const QUrl& url)
   }
   const QString u = url.toString(QUrl::FullyDecoded).trimmed();
   return u.isEmpty() ? QStringLiteral("Bookmark") : u;
+}
+
+QString escapeHtml(const QString& input)
+{
+  QString out;
+  out.reserve(input.size());
+  for (QChar ch : input) {
+    switch (ch.unicode()) {
+      case '&':
+        out += QStringLiteral("&amp;");
+        break;
+      case '<':
+        out += QStringLiteral("&lt;");
+        break;
+      case '>':
+        out += QStringLiteral("&gt;");
+        break;
+      case '"':
+        out += QStringLiteral("&quot;");
+        break;
+      case '\'':
+        out += QStringLiteral("&#39;");
+        break;
+      default:
+        out += ch;
+        break;
+    }
+  }
+  return out;
+}
+
+QString decodeHtmlEntities(const QString& input)
+{
+  QString out;
+  out.reserve(input.size());
+
+  for (int i = 0; i < input.size(); ++i) {
+    const QChar ch = input.at(i);
+    if (ch != '&') {
+      out += ch;
+      continue;
+    }
+
+    const int semi = input.indexOf(';', i + 1);
+    if (semi < 0 || semi - i > 16) {
+      out += ch;
+      continue;
+    }
+
+    const QString entity = input.mid(i + 1, semi - i - 1).trimmed();
+    if (entity.isEmpty()) {
+      out += ch;
+      continue;
+    }
+
+    auto appendCodepoint = [&out](uint codepoint) {
+      if (codepoint == 0 || codepoint > 0x10FFFF) {
+        return;
+      }
+      if (codepoint <= 0xFFFF) {
+        out += QChar(static_cast<ushort>(codepoint));
+        return;
+      }
+
+      char32_t ucs4[2] = { static_cast<char32_t>(codepoint), 0 };
+      out += QString::fromUcs4(reinterpret_cast<const char32_t*>(ucs4));
+    };
+
+    if (entity.startsWith('#')) {
+      bool ok = false;
+      uint codepoint = 0;
+      if (entity.size() >= 3 && (entity[1] == 'x' || entity[1] == 'X')) {
+        codepoint = entity.mid(2).toUInt(&ok, 16);
+      } else {
+        codepoint = entity.mid(1).toUInt(&ok, 10);
+      }
+      if (ok) {
+        appendCodepoint(codepoint);
+        i = semi;
+        continue;
+      }
+    } else if (entity.compare(QStringLiteral("amp"), Qt::CaseInsensitive) == 0) {
+      out += '&';
+      i = semi;
+      continue;
+    } else if (entity.compare(QStringLiteral("lt"), Qt::CaseInsensitive) == 0) {
+      out += '<';
+      i = semi;
+      continue;
+    } else if (entity.compare(QStringLiteral("gt"), Qt::CaseInsensitive) == 0) {
+      out += '>';
+      i = semi;
+      continue;
+    } else if (entity.compare(QStringLiteral("quot"), Qt::CaseInsensitive) == 0) {
+      out += '"';
+      i = semi;
+      continue;
+    } else if (entity.compare(QStringLiteral("apos"), Qt::CaseInsensitive) == 0 ||
+               entity.compare(QStringLiteral("#39"), Qt::CaseInsensitive) == 0) {
+      out += '\'';
+      i = semi;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+QString stripTags(const QString& input)
+{
+  QString out;
+  out.reserve(input.size());
+
+  bool inTag = false;
+  for (QChar ch : input) {
+    if (ch == '<') {
+      inTag = true;
+      continue;
+    }
+    if (ch == '>') {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+QString extractAttribute(const QString& tag, const QString& name)
+{
+  const QString pattern =
+    QStringLiteral(uR"re(\b%1\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))re").arg(QRegularExpression::escape(name));
+  const QRegularExpression re(pattern, QRegularExpression::CaseInsensitiveOption);
+  const QRegularExpressionMatch m = re.match(tag);
+  if (!m.hasMatch()) {
+    return {};
+  }
+
+  for (int i = 1; i <= 3; ++i) {
+    const QString value = m.captured(i);
+    if (!value.isEmpty()) {
+      return value.trimmed();
+    }
+  }
+  return {};
+}
+
+qint64 parseAddDateMs(const QString& tag)
+{
+  const QString addDate = extractAttribute(tag, QStringLiteral("ADD_DATE"));
+  if (addDate.isEmpty()) {
+    return 0;
+  }
+
+  bool ok = false;
+  const qint64 seconds = addDate.toLongLong(&ok);
+  if (!ok || seconds <= 0) {
+    return 0;
+  }
+
+  const qint64 ms = seconds * 1000;
+  return ms > 0 ? ms : 0;
 }
 
 }
@@ -627,6 +816,279 @@ QVariantList BookmarksStore::folders() const
   }
 
   return out;
+}
+
+bool BookmarksStore::exportToHtml(const QString& filePath)
+{
+  setLastError({});
+
+  const QString path = normalizeUserFilePath(filePath);
+  if (path.isEmpty()) {
+    setLastError(QStringLiteral("No file path specified"));
+    return false;
+  }
+
+  QSaveFile out(path);
+  if (!out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    setLastError(out.errorString());
+    return false;
+  }
+
+  QTextStream stream(&out);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  stream.setEncoding(QStringConverter::Utf8);
+#endif
+
+  auto orderedChildren = [this](int parentId) -> QVector<int> {
+    QVector<int> children;
+    children.reserve(m_nodes.size());
+    for (auto it = m_nodes.constBegin(); it != m_nodes.constEnd(); ++it) {
+      const Node& node = it.value();
+      if (node.parentId == parentId) {
+        children.push_back(node.id);
+      }
+    }
+    std::sort(children.begin(), children.end(), [this](int a, int b) {
+      const Node& na = m_nodes.value(a);
+      const Node& nb = m_nodes.value(b);
+      if (na.order != nb.order) {
+        return na.order < nb.order;
+      }
+      if (na.isFolder != nb.isFolder) {
+        return na.isFolder;
+      }
+      return na.id < nb.id;
+    });
+    return children;
+  };
+
+  const auto indent = [](int depth) -> QString {
+    const int spaces = qMax(0, depth) * 4;
+    return QString(spaces, QLatin1Char(' '));
+  };
+
+  const auto addDateAttr = [](qint64 createdMs) -> QString {
+    if (createdMs <= 0) {
+      return {};
+    }
+    const qint64 seconds = createdMs / 1000;
+    if (seconds <= 0) {
+      return {};
+    }
+    return QStringLiteral(" ADD_DATE=\"%1\"").arg(seconds);
+  };
+
+  stream << "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n";
+  stream << "<!-- This is an automatically generated file.\n";
+  stream << "     It will be read and overwritten.\n";
+  stream << "     DO NOT EDIT! -->\n";
+  stream << "<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n";
+  stream << "<TITLE>Bookmarks</TITLE>\n";
+  stream << "<H1>Bookmarks</H1>\n";
+  stream << "<DL><p>\n";
+
+  const auto writeFolder = [&](auto&& self, int parentId, int depth) -> void {
+    const QVector<int> children = orderedChildren(parentId);
+    for (int id : children) {
+      const auto it = m_nodes.constFind(id);
+      if (it == m_nodes.constEnd()) {
+        continue;
+      }
+      const Node& node = it.value();
+      if (node.isFolder) {
+        stream << indent(depth) << "<DT><H3" << addDateAttr(node.createdMs) << ">" << escapeHtml(node.title)
+               << "</H3>\n";
+        stream << indent(depth) << "<DL><p>\n";
+        self(self, node.id, depth + 1);
+        stream << indent(depth) << "</DL><p>\n";
+        continue;
+      }
+
+      const QString href = escapeHtml(node.url.toString(QUrl::FullyEncoded));
+      stream << indent(depth) << "<DT><A HREF=\"" << href << "\"" << addDateAttr(node.createdMs) << ">"
+             << escapeHtml(node.title) << "</A>\n";
+    }
+  };
+
+  writeFolder(writeFolder, 0, 1);
+  stream << "</DL><p>\n";
+  stream.flush();
+
+  if (stream.status() != QTextStream::Ok) {
+    setLastError(QStringLiteral("Write failed"));
+    out.cancelWriting();
+    return false;
+  }
+
+  if (!out.commit()) {
+    setLastError(out.errorString());
+    return false;
+  }
+
+  return true;
+}
+
+bool BookmarksStore::importFromHtml(const QString& filePath)
+{
+  setLastError({});
+
+  const QString path = normalizeUserFilePath(filePath);
+  if (path.isEmpty()) {
+    setLastError(QStringLiteral("No file path specified"));
+    return false;
+  }
+
+  QFile in(path);
+  if (!in.open(QIODevice::ReadOnly)) {
+    setLastError(in.errorString());
+    return false;
+  }
+
+  const QByteArray bytes = in.readAll();
+  const QString text = QString::fromUtf8(bytes);
+  const bool hasMarker =
+    text.contains(QStringLiteral("NETSCAPE-Bookmark-file"), Qt::CaseInsensitive) ||
+    text.contains(QStringLiteral("Bookmark-file"), Qt::CaseInsensitive);
+
+  const QRegularExpression tokenRe(
+    QStringLiteral(uR"re(<\s*H3\b[^>]*>.*?<\s*/\s*H3\s*>|<\s*A\b[^>]*>.*?<\s*/\s*A\s*>|<\s*DL\b[^>]*>|<\s*/\s*DL\s*>)re"),
+    QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+
+  QHash<int, Node> nodes;
+  nodes.reserve(256);
+
+  QHash<int, int> nextOrderByParent;
+  nextOrderByParent.reserve(64);
+
+  QSet<QString> seenUrlKeys;
+  seenUrlKeys.reserve(256);
+
+  QVector<int> parentStack;
+  parentStack.reserve(16);
+  parentStack.push_back(0);
+
+  int pendingFolderId = 0;
+  int nextId = 1;
+
+  const auto nextOrderFor = [&nextOrderByParent](int parentId) -> int {
+    const auto it = nextOrderByParent.find(parentId);
+    if (it == nextOrderByParent.end()) {
+      nextOrderByParent.insert(parentId, 1);
+      return 0;
+    }
+    const int order = it.value();
+    it.value() = order + 1;
+    return order;
+  };
+
+  const auto createFolderNode = [&](const QString& title, const QString& tagText, int parentId) -> int {
+    Node node;
+    node.id = nextId++;
+    node.isFolder = true;
+    node.title = normalizeFolderTitle(decodeHtmlEntities(stripTags(title)));
+    node.url = {};
+    node.parentId = parentId;
+    node.order = nextOrderFor(parentId);
+    node.createdMs = parseAddDateMs(tagText);
+    node.expanded = true;
+
+    nodes.insert(node.id, node);
+    return node.id;
+  };
+
+  const auto createBookmarkNode = [&](const QString& title, const QString& tagText, int parentId) -> void {
+    QString href = decodeHtmlEntities(extractAttribute(tagText, QStringLiteral("HREF")));
+    href = href.trimmed();
+    if (href.isEmpty()) {
+      return;
+    }
+
+    const QUrl url(href);
+    const QString key = normalizeUrlKey(url);
+    if (key.isEmpty()) {
+      return;
+    }
+    if (seenUrlKeys.contains(key)) {
+      return;
+    }
+
+    Node node;
+    node.id = nextId++;
+    node.isFolder = false;
+    node.url = url;
+    node.title = normalizeBookmarkTitle(decodeHtmlEntities(stripTags(title)), url);
+    node.parentId = parentId;
+    node.order = nextOrderFor(parentId);
+    node.createdMs = parseAddDateMs(tagText);
+    node.expanded = true;
+
+    nodes.insert(node.id, node);
+    seenUrlKeys.insert(key);
+  };
+
+  QRegularExpressionMatchIterator it = tokenRe.globalMatch(text);
+  while (it.hasNext()) {
+    const QString token = it.next().captured(0).trimmed();
+    if (token.isEmpty()) {
+      continue;
+    }
+
+    if (token.startsWith(QStringLiteral("<DL"), Qt::CaseInsensitive)) {
+      if (pendingFolderId > 0) {
+        parentStack.push_back(pendingFolderId);
+        pendingFolderId = 0;
+      }
+      continue;
+    }
+
+    if (token.startsWith(QStringLiteral("</DL"), Qt::CaseInsensitive)) {
+      pendingFolderId = 0;
+      if (parentStack.size() > 1) {
+        parentStack.pop_back();
+      }
+      continue;
+    }
+
+    const int gt = token.indexOf('>');
+    if (gt <= 0) {
+      continue;
+    }
+
+    const QString openTag = token.left(gt + 1);
+    QString innerText = token.mid(gt + 1);
+    const int closePos = innerText.lastIndexOf('<');
+    if (closePos >= 0) {
+      innerText = innerText.left(closePos);
+    }
+
+    const int parentId = parentStack.isEmpty() ? 0 : parentStack.last();
+
+    if (token.startsWith(QStringLiteral("<H3"), Qt::CaseInsensitive)) {
+      const int folderId = createFolderNode(innerText, openTag, parentId);
+      pendingFolderId = folderId;
+      continue;
+    }
+
+    if (token.startsWith(QStringLiteral("<A"), Qt::CaseInsensitive)) {
+      createBookmarkNode(innerText, openTag, parentId);
+      continue;
+    }
+  }
+
+  if (nodes.isEmpty() && !hasMarker) {
+    setLastError(QStringLiteral("File is not a Netscape bookmarks HTML export"));
+    return false;
+  }
+
+  beginResetModel();
+  m_nodes = std::move(nodes);
+  m_nextId = nextId;
+  rebuildIndex();
+  endResetModel();
+
+  emit countChanged();
+  scheduleSave();
+  return true;
 }
 
 void BookmarksStore::reload()

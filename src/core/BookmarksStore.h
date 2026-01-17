@@ -57,6 +57,9 @@ public:
   Q_INVOKABLE void toggleExpanded(int folderId);
   Q_INVOKABLE QVariantList folders() const;
 
+  Q_INVOKABLE bool exportToHtml(const QString& filePath);
+  Q_INVOKABLE bool importFromHtml(const QString& filePath);
+
   Q_INVOKABLE void reload();
   bool saveNow(QString* error = nullptr) const;
 
