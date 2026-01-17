@@ -6311,6 +6311,7 @@ ApplicationWindow {
 
         DiagnosticsDialog {
             diagnostics: diagnostics
+            view: root.focusedView
             onCloseRequested: overlayHost.hide()
         }
     }

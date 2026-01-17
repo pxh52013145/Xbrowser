@@ -16,6 +16,7 @@
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QQuickWindow>
+#include <QSaveFile>
 #include <QUrl>
 #include <QtGlobal>
 
@@ -487,6 +488,94 @@ void WebView2View::printToPdf(const QString& filePath)
 
   if (FAILED(hr)) {
     emit printToPdfFinished(trimmed, false, hresultMessage(hr));
+  }
+}
+
+void WebView2View::capturePreview(const QString& filePath)
+{
+  const QString trimmed = filePath.trimmed();
+  if (trimmed.isEmpty()) {
+    emit capturePreviewFinished(trimmed, false, QStringLiteral("Preview output path is empty."));
+    return;
+  }
+  if (m_capturePreviewInProgress) {
+    emit capturePreviewFinished(trimmed, false, QStringLiteral("CapturePreview is already in progress."));
+    return;
+  }
+  if (!m_webView) {
+    emit capturePreviewFinished(trimmed, false, QStringLiteral("WebView2 is not initialized."));
+    return;
+  }
+
+  const QFileInfo info(trimmed);
+  if (!info.absoluteDir().exists()) {
+    QDir().mkpath(info.absolutePath());
+  }
+
+  Microsoft::WRL::ComPtr<IStream> stream;
+  HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &stream);
+  if (FAILED(hr) || !stream) {
+    emit capturePreviewFinished(trimmed, false, hresultMessage(hr));
+    return;
+  }
+
+  m_capturePreviewInProgress = true;
+  const QPointer<WebView2View> self(this);
+
+  hr = m_webView->CapturePreview(
+    COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+    stream.Get(),
+    Callback<ICoreWebView2CapturePreviewCompletedHandler>([self, trimmed, stream](HRESULT errorCode) -> HRESULT {
+      if (!self) {
+        return S_OK;
+      }
+
+      const bool ok = SUCCEEDED(errorCode);
+      const QString err = ok ? QString() : hresultMessage(errorCode);
+      const QByteArray data = ok ? readStream(stream.Get()) : QByteArray();
+
+      QMetaObject::invokeMethod(
+        self,
+        [self, trimmed, ok, err, data] {
+          if (!self) {
+            return;
+          }
+
+          self->m_capturePreviewInProgress = false;
+
+          if (!ok) {
+            emit self->capturePreviewFinished(trimmed, false, err);
+            return;
+          }
+          if (data.isEmpty()) {
+            emit self->capturePreviewFinished(trimmed, false, QStringLiteral("CapturePreview returned empty data."));
+            return;
+          }
+
+          QSaveFile out(trimmed);
+          if (!out.open(QIODevice::WriteOnly)) {
+            emit self->capturePreviewFinished(trimmed, false, out.errorString());
+            return;
+          }
+          if (out.write(data) != data.size()) {
+            emit self->capturePreviewFinished(trimmed, false, out.errorString());
+            return;
+          }
+          if (!out.commit()) {
+            emit self->capturePreviewFinished(trimmed, false, out.errorString());
+            return;
+          }
+
+          emit self->capturePreviewFinished(trimmed, true, QString());
+        },
+        Qt::QueuedConnection);
+
+      return S_OK;
+    }).Get());
+
+  if (FAILED(hr)) {
+    m_capturePreviewInProgress = false;
+    emit capturePreviewFinished(trimmed, false, hresultMessage(hr));
   }
 }
 

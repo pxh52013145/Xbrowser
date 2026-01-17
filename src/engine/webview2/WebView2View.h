@@ -59,6 +59,7 @@ public:
   Q_INVOKABLE void openDevTools();
   Q_INVOKABLE void showPrintUI();
   Q_INVOKABLE void printToPdf(const QString& filePath);
+  Q_INVOKABLE void capturePreview(const QString& filePath);
   Q_INVOKABLE void setMuted(bool muted);
   Q_INVOKABLE void setZoomFactor(qreal zoomFactor);
   Q_INVOKABLE void zoomIn();
@@ -102,6 +103,7 @@ signals:
   void permissionRequested(int requestId, const QString& origin, int kind, bool userInitiated);
   void focusReceived();
   void printToPdfFinished(const QString& filePath, bool success, const QString& error);
+  void capturePreviewFinished(const QString& filePath, bool success, const QString& error);
   void browsingDataCleared(int dataKinds, bool success, const QString& error);
 
 private:
@@ -159,6 +161,7 @@ private:
   bool m_documentPlayingAudio = false;
   bool m_muted = false;
   qreal m_zoomFactor = 1.0;
+  bool m_capturePreviewInProgress = false;
   QUrl m_pendingNavigate;
   QStringList m_pendingScripts;
 
