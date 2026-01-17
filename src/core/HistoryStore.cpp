@@ -9,12 +9,86 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QStringConverter>
+#include <QTextStream>
+
+#include <algorithm>
 
 namespace
 {
 QString storagePath()
 {
   return QDir(xbrowser::appDataRoot()).filePath(QStringLiteral("history.json"));
+}
+
+QString normalizeUserFilePath(const QString& input)
+{
+  QString trimmed = input.trimmed();
+  if (trimmed.isEmpty()) {
+    return {};
+  }
+
+  if (trimmed.startsWith(QStringLiteral("file:"), Qt::CaseInsensitive)) {
+    const QUrl url(trimmed);
+    if (url.isValid() && url.isLocalFile()) {
+      const QString local = url.toLocalFile();
+      if (!local.trimmed().isEmpty()) {
+        return local;
+      }
+    }
+  }
+
+  return trimmed;
+}
+
+QString normalizeDomainKey(const QString& input)
+{
+  QString trimmed = input.trimmed();
+  if (trimmed.isEmpty()) {
+    return {};
+  }
+
+  if (trimmed.contains(QStringLiteral("://"))) {
+    const QUrl url(trimmed);
+    if (url.isValid() && !url.host().isEmpty()) {
+      trimmed = url.host();
+    }
+  }
+
+  while (trimmed.startsWith('.')) {
+    trimmed.remove(0, 1);
+  }
+
+  return trimmed.trimmed().toLower();
+}
+
+bool hostMatchesDomain(const QString& host, const QString& domain)
+{
+  if (domain.isEmpty()) {
+    return true;
+  }
+
+  const QString h = host.trimmed().toLower();
+  if (h.isEmpty()) {
+    return false;
+  }
+
+  if (h == domain) {
+    return true;
+  }
+
+  if (h.endsWith(domain) && h.size() > domain.size() && h.at(h.size() - domain.size() - 1) == QLatin1Char('.')) {
+    return true;
+  }
+
+  return false;
+}
+
+QString escapeCsvField(const QString& input)
+{
+  QString out = input;
+  out.replace('"', QStringLiteral("\"\""));
+  return QStringLiteral("\"%1\"").arg(out);
 }
 }
 
@@ -246,6 +320,149 @@ void HistoryStore::clearRange(qint64 fromMs, qint64 toMs)
 
   emit countChanged();
   scheduleSave();
+}
+
+int HistoryStore::deleteByDomain(const QString& domain)
+{
+  const QString domainKey = normalizeDomainKey(domain);
+  if (domainKey.isEmpty()) {
+    return 0;
+  }
+
+  QVector<Entry> kept;
+  kept.reserve(m_entries.size());
+
+  int removed = 0;
+  for (const Entry& e : m_entries) {
+    const QString host = e.url.host();
+    if (hostMatchesDomain(host, domainKey)) {
+      ++removed;
+      continue;
+    }
+    kept.push_back(e);
+  }
+
+  if (removed <= 0) {
+    return 0;
+  }
+
+  beginResetModel();
+  m_entries = std::move(kept);
+  endResetModel();
+
+  emit countChanged();
+  scheduleSave();
+  return removed;
+}
+
+QVariantList HistoryStore::query(const QString& domain, qint64 fromMs, qint64 toMs, int limit) const
+{
+  const QString domainKey = normalizeDomainKey(domain);
+  const int resolvedLimit = qMax(0, limit);
+
+  QVector<const Entry*> matches;
+  matches.reserve(m_entries.size());
+
+  for (const Entry& e : m_entries) {
+    if (fromMs > 0 && e.visitedMs < fromMs) {
+      continue;
+    }
+    if (toMs > 0 && e.visitedMs >= toMs) {
+      continue;
+    }
+    if (!domainKey.isEmpty() && !hostMatchesDomain(e.url.host(), domainKey)) {
+      continue;
+    }
+    matches.push_back(&e);
+  }
+
+  std::sort(matches.begin(), matches.end(), [](const Entry* a, const Entry* b) {
+    if (a->visitedMs != b->visitedMs) {
+      return a->visitedMs > b->visitedMs;
+    }
+    return a->id > b->id;
+  });
+
+  if (resolvedLimit > 0 && matches.size() > resolvedLimit) {
+    matches.resize(resolvedLimit);
+  }
+
+  QVariantList out;
+  out.reserve(matches.size());
+
+  for (const Entry* e : matches) {
+    QVariantMap item;
+    item.insert(QStringLiteral("id"), e->id);
+    item.insert(QStringLiteral("title"), e->title);
+    item.insert(QStringLiteral("url"), e->url);
+    item.insert(QStringLiteral("visitedMs"), e->visitedMs);
+    item.insert(QStringLiteral("dayKey"), dayKeyForMs(e->visitedMs));
+    item.insert(QStringLiteral("host"), e->url.host());
+    out.push_back(item);
+  }
+
+  return out;
+}
+
+bool HistoryStore::exportToCsv(const QString& filePath, qint64 fromMs, qint64 toMs)
+{
+  setLastError({});
+
+  const QString path = normalizeUserFilePath(filePath);
+  if (path.isEmpty()) {
+    setLastError(QStringLiteral("No file path specified"));
+    return false;
+  }
+
+  QVector<const Entry*> entries;
+  entries.reserve(m_entries.size());
+  for (const Entry& e : m_entries) {
+    if (fromMs > 0 && e.visitedMs < fromMs) {
+      continue;
+    }
+    if (toMs > 0 && e.visitedMs >= toMs) {
+      continue;
+    }
+    entries.push_back(&e);
+  }
+
+  std::sort(entries.begin(), entries.end(), [](const Entry* a, const Entry* b) {
+    if (a->visitedMs != b->visitedMs) {
+      return a->visitedMs > b->visitedMs;
+    }
+    return a->id > b->id;
+  });
+
+  QSaveFile out(path);
+  if (!out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    setLastError(out.errorString());
+    return false;
+  }
+
+  QTextStream stream(&out);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  stream.setEncoding(QStringConverter::Utf8);
+#endif
+
+  stream << "visitedMs,title,url\n";
+  for (const Entry* e : entries) {
+    const QString urlText = e->url.toString(QUrl::FullyEncoded);
+    stream << e->visitedMs << ',' << escapeCsvField(e->title) << ',' << escapeCsvField(urlText) << '\n';
+  }
+  stream.flush();
+
+  if (stream.status() != QTextStream::Ok) {
+    setLastError(QStringLiteral("Write failed"));
+    out.cancelWriting();
+    return false;
+  }
+
+  if (!out.commit()) {
+    setLastError(out.errorString());
+    return false;
+  }
+
+  return true;
 }
 
 void HistoryStore::reload()

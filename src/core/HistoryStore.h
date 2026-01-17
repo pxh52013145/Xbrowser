@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QTimer>
 #include <QUrl>
+#include <QVariant>
 #include <QVector>
 
 class HistoryStore final : public QAbstractListModel
@@ -34,8 +35,12 @@ public:
   Q_INVOKABLE void addVisit(const QUrl& url, const QString& title = {}, qint64 visitedMs = 0);
   Q_INVOKABLE void removeAt(int index);
   Q_INVOKABLE void removeById(int historyId);
+  Q_INVOKABLE int deleteByDomain(const QString& domain);
   Q_INVOKABLE void clearAll();
   Q_INVOKABLE void clearRange(qint64 fromMs, qint64 toMs);
+
+  Q_INVOKABLE QVariantList query(const QString& domain, qint64 fromMs, qint64 toMs, int limit) const;
+  Q_INVOKABLE bool exportToCsv(const QString& filePath, qint64 fromMs, qint64 toMs);
 
   Q_INVOKABLE void reload();
   bool saveNow(QString* error = nullptr) const;
@@ -67,4 +72,3 @@ private:
   QString m_lastError;
   QTimer m_saveTimer;
 };
-
