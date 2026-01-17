@@ -18,6 +18,8 @@ ApplicationWindow {
     property url glanceUrl: ""
     readonly property bool fullscreenActive: visibility === Window.FullScreen
     property int preFullscreenVisibility: Window.Windowed
+    property int contentFullscreenTabId: 0
+    property bool contentFullscreenToggled: false
 
     Timer {
         id: compactTopEnterTimer
@@ -271,6 +273,37 @@ ApplicationWindow {
 
         root.preFullscreenVisibility = root.visibility
         root.visibility = Window.FullScreen
+    }
+
+    function handleContentFullscreen(tabId, enabled) {
+        const resolvedTabId = Number(tabId || 0)
+        if (resolvedTabId <= 0 || resolvedTabId !== root.focusedTabId) {
+            return
+        }
+
+        const active = enabled === true
+        if (active) {
+            root.contentFullscreenTabId = resolvedTabId
+            if (!root.fullscreenActive) {
+                root.contentFullscreenToggled = true
+                root.toggleFullscreen()
+            } else {
+                root.contentFullscreenToggled = false
+            }
+
+            toast.showToast("Entered fullscreen", "Exit", "toggle-fullscreen", 4000)
+            return
+        }
+
+        if (root.contentFullscreenTabId === resolvedTabId) {
+            root.contentFullscreenTabId = 0
+            if (root.contentFullscreenToggled && root.fullscreenActive) {
+                root.contentFullscreenToggled = false
+                root.toggleFullscreen()
+            } else {
+                root.contentFullscreenToggled = false
+            }
+        }
     }
 
     Platform.FileDialog {
@@ -4957,6 +4990,8 @@ ApplicationWindow {
                             splitView.focusedPane = paneIndex
                         }
                     }
+
+                    onContainsFullScreenElementChanged: root.handleContentFullscreen(tabId, containsFullScreenElement)
 
                     onContextMenuRequested: (info) => root.openWebContextMenu(tabId, info)
 

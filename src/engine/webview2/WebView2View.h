@@ -26,6 +26,7 @@ class WebView2View : public QQuickItem
   Q_PROPERTY(QUrl currentUrl READ currentUrl NOTIFY currentUrlChanged)
   Q_PROPERTY(QString title READ title NOTIFY titleChanged)
   Q_PROPERTY(QUrl faviconUrl READ faviconUrl NOTIFY faviconUrlChanged)
+  Q_PROPERTY(bool containsFullScreenElement READ containsFullScreenElement NOTIFY containsFullScreenElementChanged)
   Q_PROPERTY(bool documentPlayingAudio READ documentPlayingAudio NOTIFY documentPlayingAudioChanged)
   Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
   Q_PROPERTY(qreal zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY zoomFactorChanged)
@@ -43,6 +44,7 @@ public:
   QUrl currentUrl() const;
   QString title() const;
   QUrl faviconUrl() const;
+  bool containsFullScreenElement() const;
   bool documentPlayingAudio() const;
   bool muted() const;
   qreal zoomFactor() const;
@@ -79,6 +81,7 @@ signals:
   void currentUrlChanged();
   void titleChanged();
   void faviconUrlChanged();
+  void containsFullScreenElementChanged();
   void documentPlayingAudioChanged();
   void mutedChanged();
   void zoomFactorChanged();
@@ -110,6 +113,7 @@ private:
   void setCurrentUrl(const QUrl& url);
   void setTitle(const QString& title);
   void setFaviconUrl(const QUrl& url);
+  void setContainsFullScreenElementValue(bool contains);
   void setDocumentPlayingAudio(bool playing);
   void setMutedValue(bool muted);
   void setZoomFactorValue(qreal zoomFactor);
@@ -129,6 +133,7 @@ private:
   EventRegistrationToken m_faviconChangedToken{};
   EventRegistrationToken m_audioChangedToken{};
   EventRegistrationToken m_mutedChangedToken{};
+  EventRegistrationToken m_containsFullScreenElementChangedToken{};
   EventRegistrationToken m_contextMenuRequestedToken{};
   EventRegistrationToken m_permissionRequestedToken{};
   EventRegistrationToken m_gotFocusToken{};
@@ -144,6 +149,7 @@ private:
   QUrl m_currentUrl;
   QString m_title;
   QUrl m_faviconUrl;
+  bool m_containsFullScreenElement = false;
   bool m_documentPlayingAudio = false;
   bool m_muted = false;
   qreal m_zoomFactor = 1.0;

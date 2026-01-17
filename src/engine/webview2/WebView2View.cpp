@@ -193,6 +193,7 @@ WebView2View::~WebView2View()
   if (m_webView) {
     m_webView->remove_DocumentTitleChanged(m_titleChangedToken);
     m_webView->remove_SourceChanged(m_sourceChangedToken);
+    m_webView->remove_ContainsFullScreenElementChanged(m_containsFullScreenElementChangedToken);
     m_webView->remove_NavigationStarting(m_navigationStartingToken);
     m_webView->remove_NavigationCompleted(m_navigationCompletedToken);
     m_webView->remove_HistoryChanged(m_historyChangedToken);
@@ -280,6 +281,11 @@ QString WebView2View::title() const
 QUrl WebView2View::faviconUrl() const
 {
   return m_faviconUrl;
+}
+
+bool WebView2View::containsFullScreenElement() const
+{
+  return m_containsFullScreenElement;
 }
 
 bool WebView2View::documentPlayingAudio() const
@@ -871,6 +877,29 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
             .Get(),
           &m_sourceChangedToken);
 
+        BOOL containsFullScreen = FALSE;
+        if (SUCCEEDED(m_webView->get_ContainsFullScreenElement(&containsFullScreen))) {
+          setContainsFullScreenElementValue(containsFullScreen == TRUE);
+        }
+
+        m_webView->add_ContainsFullScreenElementChanged(
+          Callback<ICoreWebView2ContainsFullScreenElementChangedEventHandler>(
+            [this](ICoreWebView2* sender, IUnknown*) -> HRESULT {
+              BOOL contains = FALSE;
+              if (sender && SUCCEEDED(sender->get_ContainsFullScreenElement(&contains))) {
+                const bool next = (contains == TRUE);
+                QMetaObject::invokeMethod(
+                  this,
+                  [this, next] {
+                    setContainsFullScreenElementValue(next);
+                  },
+                  Qt::QueuedConnection);
+              }
+              return S_OK;
+            })
+            .Get(),
+          &m_containsFullScreenElementChangedToken);
+
         m_webView->add_NavigationStarting(
           Callback<ICoreWebView2NavigationStartingEventHandler>(
             [this](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT {
@@ -1326,6 +1355,15 @@ void WebView2View::setFaviconUrl(const QUrl& url)
   }
   m_faviconUrl = url;
   emit faviconUrlChanged();
+}
+
+void WebView2View::setContainsFullScreenElementValue(bool contains)
+{
+  if (m_containsFullScreenElement == contains) {
+    return;
+  }
+  m_containsFullScreenElement = contains;
+  emit containsFullScreenElementChanged();
 }
 
 void WebView2View::setDocumentPlayingAudio(bool playing)
