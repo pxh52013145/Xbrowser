@@ -28,6 +28,8 @@
     <file>qml/components/PermissionDoorhanger.qml</file>
     <file>qml/components/PermissionsCenter.qml</file>
     <file>qml/components/SitePermissionsPanel.qml</file>
+    <file>qml/components/SiteDataPanel.qml</file>
+    <file>qml/components/SiteInfoPanel.qml</file>
     <file>qml/components/ToastHost.qml</file>
     <file>qml/components/WebPanelsDialog.qml</file>
   </qresource>

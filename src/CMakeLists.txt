@@ -31,6 +31,7 @@ qt_add_executable(xbrowser
   core/WebPanelsStore.cpp
   core/WorkspaceModel.cpp
   engine/webview2/WebView2View.cpp
+  engine/webview2/WebView2CookieModel.cpp
   engine/webview2/BrowserExtensionsModel.cpp
   ../ui/ui.qrc
 )

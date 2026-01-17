@@ -1698,63 +1698,42 @@ ApplicationWindow {
     Component {
         id: sitePanelComponent
 
-        Rectangle {
-            color: Qt.rgba(1, 1, 1, 0.98)
-            radius: root.uiRadius
-            border.color: Qt.rgba(0, 0, 0, 0.08)
-            border.width: 1
-
-            implicitWidth: 260
-            implicitHeight: panelColumn.implicitHeight + 16
-
-            ColumnLayout {
-                id: panelColumn
-                anchors.fill: parent
-                anchors.margins: root.uiSpacing
-                spacing: root.uiSpacing
-
-                Label {
-                    text: root.focusedView
-                              ? (root.focusedView.currentUrl.host.length > 0 ? root.focusedView.currentUrl.host : root.focusedView.currentUrl.toString())
-                              : ""
-                    elide: Text.ElideRight
-                    font.bold: true
-                }
-
-                Button {
-                    text: "Copy URL"
-                    onClicked: {
-                        popupManager.close()
-                        commands.invoke("copy-url", { tabId: root.focusedTabId })
-                    }
-                }
-
-                Button {
-                    text: "Share URL"
-                    onClicked: {
-                        popupManager.close()
-                        commands.invoke("share-url", { tabId: root.focusedTabId })
-                    }
-                }
-
-                Button {
-                    text: "Permissions"
-                    onClicked: root.toggleTopBarPopup("site-permissions", sitePermissionsPanelComponent, sitePanelButton)
-                }
-
-                Button {
-                    text: "Extensions"
-                    onClicked: root.openExtensionsPanel(sitePanelButton)
-                }
-
-                Button {
-                    text: "DevTools"
-                    onClicked: {
-                        popupManager.close()
-                        commands.invoke("open-devtools")
-                    }
-                }
+        SiteInfoPanel {
+            cornerRadius: root.uiRadius
+            spacing: root.uiSpacing
+            pageUrl: root.focusedView ? root.focusedView.currentUrl : ""
+            onCloseRequested: popupManager.close()
+            onPermissionsRequested: root.toggleTopBarPopup("site-permissions", sitePermissionsPanelComponent, sitePanelButton)
+            onSiteDataRequested: root.toggleTopBarPopup("site-data", siteDataPanelComponent, sitePanelButton)
+            onCopyUrlRequested: {
+                popupManager.close()
+                commands.invoke("copy-url", { tabId: root.focusedTabId })
             }
+            onShareUrlRequested: {
+                popupManager.close()
+                commands.invoke("share-url", { tabId: root.focusedTabId })
+            }
+            onExtensionsRequested: {
+                popupManager.close()
+                root.openExtensionsPanel(sitePanelButton)
+            }
+            onDevToolsRequested: {
+                popupManager.close()
+                commands.invoke("open-devtools")
+            }
+        }
+    }
+
+    Component {
+        id: siteDataPanelComponent
+
+        SiteDataPanel {
+            cornerRadius: root.uiRadius
+            spacing: root.uiSpacing
+            view: root.focusedView
+            pageUrl: root.focusedView ? root.focusedView.currentUrl : ""
+            host: root.focusedView ? root.focusedView.currentUrl.host : ""
+            onCloseRequested: popupManager.close()
         }
     }
 
