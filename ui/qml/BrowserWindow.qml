@@ -6058,6 +6058,7 @@ ApplicationWindow {
             BookmarksPanel {
                 anchors.fill: parent
                 bookmarks: root.bookmarksModel
+                popupManager: popupManager
                 embedded: true
                 onCloseRequested: popupManager.close()
             }
@@ -6144,6 +6145,7 @@ ApplicationWindow {
 
         BookmarksPanel {
             bookmarks: root.bookmarksModel
+            popupManager: popupManager
             embedded: true
             onCloseRequested: root.sidebarPanel = "tabs"
         }
@@ -6185,6 +6187,7 @@ ApplicationWindow {
 
         BookmarksPanel {
             bookmarks: root.bookmarksModel
+            popupManager: popupManager
             onCloseRequested: overlayHost.hide()
         }
     }

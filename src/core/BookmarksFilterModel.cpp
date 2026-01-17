@@ -55,9 +55,13 @@ bool BookmarksFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex& so
     return true;
   }
 
+  const bool isFolder = idx.data(BookmarksStore::IsFolderRole).toBool();
+  if (isFolder) {
+    return false;
+  }
+
   const QString needle = m_searchText;
   const QString title = idx.data(BookmarksStore::TitleRole).toString();
   const QString urlText = idx.data(BookmarksStore::UrlRole).toUrl().toString(QUrl::FullyDecoded);
   return title.contains(needle, Qt::CaseInsensitive) || urlText.contains(needle, Qt::CaseInsensitive);
 }
-
