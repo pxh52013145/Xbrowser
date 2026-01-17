@@ -72,6 +72,10 @@ public:
   Q_INVOKABLE void respondToPermissionRequest(int requestId, int state, bool remember);
   Q_INVOKABLE void clearBrowsingData(int dataKinds, qint64 fromMs, qint64 toMs);
 
+  Q_INVOKABLE bool pauseDownload(int downloadOperationId);
+  Q_INVOKABLE bool resumeDownload(int downloadOperationId);
+  Q_INVOKABLE bool cancelDownload(int downloadOperationId);
+
 signals:
   void initializedChanged();
   void initErrorChanged();
@@ -90,8 +94,9 @@ signals:
   void webMessageReceived(const QString& json);
   void scriptExecuted(const QString& resultJson);
 
-  void downloadStarted(const QString& uri, const QString& resultFilePath);
-  void downloadFinished(const QString& uri, const QString& resultFilePath, bool success);
+  void downloadStarted(int downloadOperationId, const QString& uri, const QString& resultFilePath, qint64 totalBytes);
+  void downloadProgress(int downloadOperationId, qint64 bytesReceived, qint64 totalBytes, bool paused, bool canResume, const QString& interruptReason);
+  void downloadFinished(int downloadOperationId, const QString& uri, const QString& resultFilePath, bool success, const QString& interruptReason);
 
   void contextMenuRequested(const QVariantMap& info);
   void permissionRequested(int requestId, const QString& origin, int kind, bool userInitiated);
@@ -109,6 +114,7 @@ private:
   void updateAudioState();
   void flushPendingScripts();
   void handleDownloadStateChanged(int subscriptionId, ICoreWebView2DownloadOperation* download);
+  void handleDownloadBytesReceivedChanged(int subscriptionId, ICoreWebView2DownloadOperation* download);
   void setIsLoading(bool loading);
   void setCurrentUrl(const QUrl& url);
   void setTitle(const QString& title);
@@ -161,6 +167,7 @@ private:
     int id = 0;
     Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> operation;
     EventRegistrationToken stateChangedToken{};
+    EventRegistrationToken bytesReceivedChangedToken{};
     QString uri;
     QString filePath;
   };

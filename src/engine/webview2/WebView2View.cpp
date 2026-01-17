@@ -163,6 +163,74 @@ QUrl normalizeUserInput(const QUrl& input)
   }
   return QUrl::fromUserInput(input.toString());
 }
+
+QString downloadInterruptReasonToText(COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON reason)
+{
+  switch (reason) {
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE:
+      return {};
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_FAILED:
+      return QStringLiteral("File failed");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED:
+      return QStringLiteral("File access denied");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE:
+      return QStringLiteral("No space left on device");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG:
+      return QStringLiteral("File name too long");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE:
+      return QStringLiteral("File too large");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS:
+      return QStringLiteral("File flagged as malicious");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR:
+      return QStringLiteral("File transient error");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY:
+      return QStringLiteral("Blocked by policy");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED:
+      return QStringLiteral("File security check failed");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_SHORT:
+      return QStringLiteral("File too short");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_HASH_MISMATCH:
+      return QStringLiteral("File hash mismatch");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED:
+      return QStringLiteral("Network failed");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT:
+      return QStringLiteral("Network timeout");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED:
+      return QStringLiteral("Network disconnected");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN:
+      return QStringLiteral("Server down");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST:
+      return QStringLiteral("Invalid request");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED:
+      return QStringLiteral("Server failed");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_NO_RANGE:
+      return QStringLiteral("Server does not support range requests");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT:
+      return QStringLiteral("Bad content");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_UNAUTHORIZED:
+      return QStringLiteral("Unauthorized");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_CERTIFICATE_PROBLEM:
+      return QStringLiteral("Certificate problem");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN:
+      return QStringLiteral("Forbidden");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_UNEXPECTED_RESPONSE:
+      return QStringLiteral("Unexpected response");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH:
+      return QStringLiteral("Content length mismatch");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT:
+      return QStringLiteral("Cross-origin redirect");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED:
+      return QStringLiteral("Canceled");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN:
+      return QStringLiteral("Canceled (shutdown)");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED:
+      return QStringLiteral("Paused");
+    case COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_DOWNLOAD_PROCESS_CRASHED:
+      return QStringLiteral("Download process crashed");
+    default:
+      return QStringLiteral("Interrupt reason %1").arg(static_cast<int>(reason));
+  }
+}
 }
 
 WebView2View::WebView2View(QQuickItem* parent)
@@ -228,6 +296,7 @@ WebView2View::~WebView2View()
     for (auto& sub : m_downloadSubscriptions) {
       if (sub.operation) {
         sub.operation->remove_StateChanged(sub.stateChangedToken);
+        sub.operation->remove_BytesReceivedChanged(sub.bytesReceivedChangedToken);
       }
     }
   }
@@ -498,6 +567,72 @@ void WebView2View::clearBrowsingData(int dataKinds, qint64 fromMs, qint64 toMs)
   if (FAILED(callResult)) {
     emit browsingDataCleared(dataKinds, false, hresultMessage(callResult));
   }
+}
+
+bool WebView2View::pauseDownload(int downloadOperationId)
+{
+  for (int i = 0; i < m_downloadSubscriptions.size(); ++i) {
+    auto& sub = m_downloadSubscriptions[i];
+    if (sub.id != downloadOperationId) {
+      continue;
+    }
+    if (!sub.operation) {
+      return false;
+    }
+
+    Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> op = sub.operation;
+    const HRESULT hr = op->Pause();
+    if (FAILED(hr)) {
+      return false;
+    }
+    handleDownloadStateChanged(downloadOperationId, op.Get());
+    return true;
+  }
+  return false;
+}
+
+bool WebView2View::resumeDownload(int downloadOperationId)
+{
+  for (int i = 0; i < m_downloadSubscriptions.size(); ++i) {
+    auto& sub = m_downloadSubscriptions[i];
+    if (sub.id != downloadOperationId) {
+      continue;
+    }
+    if (!sub.operation) {
+      return false;
+    }
+
+    Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> op = sub.operation;
+    const HRESULT hr = op->Resume();
+    if (FAILED(hr)) {
+      return false;
+    }
+    handleDownloadStateChanged(downloadOperationId, op.Get());
+    return true;
+  }
+  return false;
+}
+
+bool WebView2View::cancelDownload(int downloadOperationId)
+{
+  for (int i = 0; i < m_downloadSubscriptions.size(); ++i) {
+    auto& sub = m_downloadSubscriptions[i];
+    if (sub.id != downloadOperationId) {
+      continue;
+    }
+    if (!sub.operation) {
+      return false;
+    }
+
+    Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> op = sub.operation;
+    const HRESULT hr = op->Cancel();
+    if (FAILED(hr)) {
+      return false;
+    }
+    handleDownloadStateChanged(downloadOperationId, op.Get());
+    return true;
+  }
+  return false;
 }
 
 void WebView2View::setMuted(bool muted)
@@ -1153,14 +1288,18 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
                   CoTaskMemFree(filePath);
                 }
 
-                emit downloadStarted(uriStr, filePathStr);
-
                 const int subscriptionId = m_nextDownloadSubscriptionId++;
                 DownloadSubscription sub;
                 sub.id = subscriptionId;
                 sub.operation = download;
                 sub.uri = uriStr;
                 sub.filePath = filePathStr;
+
+                INT64 totalBytes = 0;
+                download->get_TotalBytesToReceive(&totalBytes);
+
+                emit downloadStarted(subscriptionId, uriStr, filePathStr, static_cast<qint64>(totalBytes));
+                emit downloadProgress(subscriptionId, 0, static_cast<qint64>(totalBytes), false, false, QString());
 
                 download->add_StateChanged(
                   Callback<ICoreWebView2StateChangedEventHandler>(
@@ -1170,6 +1309,15 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
                     })
                     .Get(),
                   &sub.stateChangedToken);
+
+                download->add_BytesReceivedChanged(
+                  Callback<ICoreWebView2BytesReceivedChangedEventHandler>(
+                    [this, subscriptionId](ICoreWebView2DownloadOperation* sender, IUnknown*) -> HRESULT {
+                      handleDownloadBytesReceivedChanged(subscriptionId, sender);
+                      return S_OK;
+                    })
+                    .Get(),
+                  &sub.bytesReceivedChangedToken);
 
                 m_downloadSubscriptions.push_back(sub);
 
@@ -1224,7 +1372,35 @@ void WebView2View::handleDownloadStateChanged(int subscriptionId, ICoreWebView2D
     return;
   }
 
-  if (state != COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED && state != COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED) {
+  INT64 bytesReceived = 0;
+  download->get_BytesReceived(&bytesReceived);
+
+  INT64 totalBytes = 0;
+  download->get_TotalBytesToReceive(&totalBytes);
+
+  BOOL canResumeVal = FALSE;
+  download->get_CanResume(&canResumeVal);
+  const bool canResume = canResumeVal == TRUE;
+
+  COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON interruptReason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+  if (state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED) {
+    download->get_InterruptReason(&interruptReason);
+  }
+  const bool paused = state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED && canResume &&
+                      interruptReason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED;
+  const QString interruptReasonText = downloadInterruptReasonToText(interruptReason);
+
+  emit downloadProgress(
+    subscriptionId,
+    static_cast<qint64>(bytesReceived),
+    static_cast<qint64>(totalBytes),
+    paused,
+    canResume,
+    interruptReasonText);
+
+  const bool success = state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED;
+  const bool finalFailure = state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED && !canResume;
+  if (!success && !finalFailure) {
     return;
   }
 
@@ -1234,15 +1410,53 @@ void WebView2View::handleDownloadStateChanged(int subscriptionId, ICoreWebView2D
       continue;
     }
 
-    const bool success = state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED;
-    emit downloadFinished(sub.uri, sub.filePath, success);
+    emit downloadFinished(sub.id, sub.uri, sub.filePath, success, success ? QString() : interruptReasonText);
 
     if (sub.operation) {
       sub.operation->remove_StateChanged(sub.stateChangedToken);
+      sub.operation->remove_BytesReceivedChanged(sub.bytesReceivedChangedToken);
     }
     m_downloadSubscriptions.removeAt(i);
     return;
   }
+}
+
+void WebView2View::handleDownloadBytesReceivedChanged(int subscriptionId, ICoreWebView2DownloadOperation* download)
+{
+  if (!download) {
+    return;
+  }
+
+  INT64 bytesReceived = 0;
+  download->get_BytesReceived(&bytesReceived);
+
+  INT64 totalBytes = 0;
+  download->get_TotalBytesToReceive(&totalBytes);
+
+  COREWEBVIEW2_DOWNLOAD_STATE state{};
+  if (FAILED(download->get_State(&state))) {
+    return;
+  }
+
+  BOOL canResumeVal = FALSE;
+  download->get_CanResume(&canResumeVal);
+  const bool canResume = canResumeVal == TRUE;
+
+  COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON interruptReason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+  if (state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED) {
+    download->get_InterruptReason(&interruptReason);
+  }
+  const bool paused = state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED && canResume &&
+                      interruptReason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED;
+  const QString interruptReasonText = downloadInterruptReasonToText(interruptReason);
+
+  emit downloadProgress(
+    subscriptionId,
+    static_cast<qint64>(bytesReceived),
+    static_cast<qint64>(totalBytes),
+    paused,
+    canResume,
+    interruptReasonText);
 }
 
 void WebView2View::updateBounds()

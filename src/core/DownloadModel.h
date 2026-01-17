@@ -17,6 +17,11 @@ public:
     FilePathRole,
     StateRole,
     SuccessRole,
+    BytesReceivedRole,
+    TotalBytesRole,
+    PausedRole,
+    CanResumeRole,
+    InterruptReasonRole,
     StartedAtRole,
     FinishedAtRole,
   };
@@ -31,8 +36,10 @@ public:
   int activeCount() const;
 
   Q_INVOKABLE int count() const;
-  Q_INVOKABLE void addStarted(const QString& uri, const QString& filePath);
+  Q_INVOKABLE int addStarted(const QString& uri, const QString& filePath);
+  Q_INVOKABLE void updateProgress(int downloadId, qint64 bytesReceived, qint64 totalBytes, bool paused, bool canResume, const QString& interruptReason);
   Q_INVOKABLE void markFinished(const QString& uri, const QString& filePath, bool success);
+  Q_INVOKABLE void markFinishedById(int downloadId, bool success, const QString& interruptReason);
   Q_INVOKABLE void clearFinished();
   Q_INVOKABLE void clearAll();
   Q_INVOKABLE void clearRange(qint64 fromMs, qint64 toMs);
@@ -58,6 +65,11 @@ private:
     QString uri;
     QString filePath;
     State state = State::InProgress;
+    qint64 bytesReceived = 0;
+    qint64 totalBytes = 0;
+    bool paused = false;
+    bool canResume = false;
+    QString interruptReason;
     qint64 startedAtMs = 0;
     qint64 finishedAtMs = 0;
   };

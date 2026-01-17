@@ -46,6 +46,16 @@ QVariant DownloadModel::data(const QModelIndex& index, int role) const
       return stateToString(entry.state);
     case SuccessRole:
       return entry.state == State::Completed;
+    case BytesReceivedRole:
+      return entry.bytesReceived;
+    case TotalBytesRole:
+      return entry.totalBytes;
+    case PausedRole:
+      return entry.paused;
+    case CanResumeRole:
+      return entry.canResume;
+    case InterruptReasonRole:
+      return entry.interruptReason;
     case StartedAtRole:
       return entry.startedAtMs;
     case FinishedAtRole:
@@ -63,6 +73,11 @@ QHash<int, QByteArray> DownloadModel::roleNames() const
     {FilePathRole, "filePath"},
     {StateRole, "state"},
     {SuccessRole, "success"},
+    {BytesReceivedRole, "bytesReceived"},
+    {TotalBytesRole, "totalBytes"},
+    {PausedRole, "paused"},
+    {CanResumeRole, "canResume"},
+    {InterruptReasonRole, "interruptReason"},
     {StartedAtRole, "startedAt"},
     {FinishedAtRole, "finishedAt"},
   };
@@ -78,14 +93,14 @@ int DownloadModel::count() const
   return m_entries.size();
 }
 
-void DownloadModel::addStarted(const QString& uri, const QString& filePath)
+int DownloadModel::addStarted(const QString& uri, const QString& filePath)
 {
   ensureLoaded();
 
   const QString trimmedUri = uri.trimmed();
   const QString trimmedPath = filePath.trimmed();
   if (trimmedUri.isEmpty() && trimmedPath.isEmpty()) {
-    return;
+    return 0;
   }
 
   Entry entry;
@@ -93,6 +108,11 @@ void DownloadModel::addStarted(const QString& uri, const QString& filePath)
   entry.uri = trimmedUri;
   entry.filePath = trimmedPath;
   entry.state = State::InProgress;
+  entry.bytesReceived = 0;
+  entry.totalBytes = 0;
+  entry.paused = false;
+  entry.canResume = false;
+  entry.interruptReason.clear();
   entry.startedAtMs = QDateTime::currentMSecsSinceEpoch();
 
   const int row = m_entries.size();
@@ -102,6 +122,27 @@ void DownloadModel::addStarted(const QString& uri, const QString& filePath)
 
   updateActiveCount();
   saveNow();
+  return entry.id;
+}
+
+void DownloadModel::updateProgress(int downloadId, qint64 bytesReceived, qint64 totalBytes, bool paused, bool canResume, const QString& interruptReason)
+{
+  ensureLoaded();
+
+  const int row = findIndexById(downloadId);
+  if (row < 0) {
+    return;
+  }
+
+  Entry& entry = m_entries[row];
+  entry.bytesReceived = qMax<qint64>(0, bytesReceived);
+  entry.totalBytes = qMax<qint64>(0, totalBytes);
+  entry.paused = paused;
+  entry.canResume = canResume;
+  entry.interruptReason = interruptReason.trimmed();
+
+  const QModelIndex idx = index(row, 0);
+  emit dataChanged(idx, idx, {BytesReceivedRole, TotalBytesRole, PausedRole, CanResumeRole, InterruptReasonRole});
 }
 
 void DownloadModel::markFinished(const QString& uri, const QString& filePath, bool success)
@@ -115,10 +156,35 @@ void DownloadModel::markFinished(const QString& uri, const QString& filePath, bo
 
   Entry& entry = m_entries[row];
   entry.state = success ? State::Completed : State::Failed;
+  entry.paused = false;
+  entry.canResume = false;
+  entry.interruptReason = success ? QString() : QStringLiteral("Interrupted");
   entry.finishedAtMs = QDateTime::currentMSecsSinceEpoch();
 
   const QModelIndex idx = index(row, 0);
-  emit dataChanged(idx, idx, {StateRole, SuccessRole, FinishedAtRole});
+  emit dataChanged(idx, idx, {StateRole, SuccessRole, FinishedAtRole, PausedRole, CanResumeRole, InterruptReasonRole});
+  updateActiveCount();
+  saveNow();
+}
+
+void DownloadModel::markFinishedById(int downloadId, bool success, const QString& interruptReason)
+{
+  ensureLoaded();
+
+  const int row = findIndexById(downloadId);
+  if (row < 0) {
+    return;
+  }
+
+  Entry& entry = m_entries[row];
+  entry.state = success ? State::Completed : State::Failed;
+  entry.paused = false;
+  entry.canResume = false;
+  entry.interruptReason = success ? QString() : interruptReason.trimmed();
+  entry.finishedAtMs = QDateTime::currentMSecsSinceEpoch();
+
+  const QModelIndex idx = index(row, 0);
+  emit dataChanged(idx, idx, {StateRole, SuccessRole, FinishedAtRole, PausedRole, CanResumeRole, InterruptReasonRole});
   updateActiveCount();
   saveNow();
 }
@@ -416,6 +482,11 @@ bool DownloadModel::loadNow()
     entry.uri = uri;
     entry.filePath = filePath;
     entry.state = stateFromString(obj.value(QStringLiteral("state")).toString());
+    entry.bytesReceived = static_cast<qint64>(obj.value(QStringLiteral("bytesReceived")).toDouble());
+    entry.totalBytes = static_cast<qint64>(obj.value(QStringLiteral("totalBytes")).toDouble());
+    entry.paused = obj.value(QStringLiteral("paused")).toBool(false);
+    entry.canResume = obj.value(QStringLiteral("canResume")).toBool(false);
+    entry.interruptReason = obj.value(QStringLiteral("interruptReason")).toString().trimmed();
     entry.startedAtMs = static_cast<qint64>(obj.value(QStringLiteral("startedAtMs")).toDouble());
     entry.finishedAtMs = static_cast<qint64>(obj.value(QStringLiteral("finishedAtMs")).toDouble());
 
@@ -456,6 +527,11 @@ bool DownloadModel::saveNow() const
     obj.insert(QStringLiteral("uri"), entry.uri);
     obj.insert(QStringLiteral("filePath"), entry.filePath);
     obj.insert(QStringLiteral("state"), stateToString(entry.state));
+    obj.insert(QStringLiteral("bytesReceived"), static_cast<double>(entry.bytesReceived));
+    obj.insert(QStringLiteral("totalBytes"), static_cast<double>(entry.totalBytes));
+    obj.insert(QStringLiteral("paused"), entry.paused);
+    obj.insert(QStringLiteral("canResume"), entry.canResume);
+    obj.insert(QStringLiteral("interruptReason"), entry.interruptReason);
     obj.insert(QStringLiteral("startedAtMs"), static_cast<double>(entry.startedAtMs));
     obj.insert(QStringLiteral("finishedAtMs"), static_cast<double>(entry.finishedAtMs));
     items.append(obj);

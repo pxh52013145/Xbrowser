@@ -24,6 +24,9 @@ ApplicationWindow {
     property int viewSourceTabId: 0
     property var viewSourceTargetView: null
 
+    property var activeDownloadIdByKey: ({})
+    property var activeDownloadOpById: ({})
+
     Timer {
         id: compactTopEnterTimer
         interval: 120
@@ -936,17 +939,83 @@ ApplicationWindow {
         }
     }
 
-    function handleDownloadStarted(uri, resultFilePath) {
-        downloads.addStarted(uri, resultFilePath)
+    function downloadOpKey(tabId, downloadOperationId) {
+        return String(tabId) + ":" + String(downloadOperationId)
+    }
+
+    function handleDownloadStarted(tabId, downloadOperationId, uri, resultFilePath, totalBytes) {
+        const downloadId = downloads.addStarted(uri, resultFilePath)
+        if (downloadId > 0) {
+            const key = downloadOpKey(tabId, downloadOperationId)
+            activeDownloadIdByKey[key] = downloadId
+            activeDownloadOpById[downloadId] = { tabId: tabId, opId: downloadOperationId }
+            downloads.updateProgress(downloadId, 0, Number(totalBytes || 0), false, false, "")
+        }
         toast.showToast("Download started", "Downloads", "open-downloads", 3500)
     }
 
-    function handleDownloadFinished(uri, resultFilePath, success) {
-        downloads.markFinished(uri, resultFilePath, success)
+    function handleDownloadProgress(tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason) {
+        const key = downloadOpKey(tabId, downloadOperationId)
+        const downloadId = Number(activeDownloadIdByKey[key] || 0)
+        if (downloadId > 0) {
+            downloads.updateProgress(
+                        downloadId,
+                        Number(bytesReceived || 0),
+                        Number(totalBytes || 0),
+                        !!paused,
+                        !!canResume,
+                        String(interruptReason || ""))
+        }
+    }
+
+    function handleDownloadFinished(tabId, downloadOperationId, uri, resultFilePath, success, interruptReason) {
+        const key = downloadOpKey(tabId, downloadOperationId)
+        const downloadId = Number(activeDownloadIdByKey[key] || 0)
+        if (downloadId > 0) {
+            delete activeDownloadIdByKey[key]
+            delete activeDownloadOpById[downloadId]
+            downloads.markFinishedById(downloadId, !!success, String(interruptReason || ""))
+        } else {
+            downloads.markFinished(uri, resultFilePath, success)
+        }
+
         if (success) {
             toast.showToast("Download finished", "Open", "open-latest-download-file", 6000)
         } else {
             toast.showToast("Download failed", "Downloads", "open-downloads", 6000)
+        }
+    }
+
+    function pauseDownload(downloadId) {
+        const op = activeDownloadOpById[downloadId]
+        if (!op) {
+            return
+        }
+        const view = tabViews.byId[Number(op.tabId || 0)]
+        if (view && view.pauseDownload) {
+            view.pauseDownload(Number(op.opId || 0))
+        }
+    }
+
+    function resumeDownload(downloadId) {
+        const op = activeDownloadOpById[downloadId]
+        if (!op) {
+            return
+        }
+        const view = tabViews.byId[Number(op.tabId || 0)]
+        if (view && view.resumeDownload) {
+            view.resumeDownload(Number(op.opId || 0))
+        }
+    }
+
+    function cancelDownload(downloadId) {
+        const op = activeDownloadOpById[downloadId]
+        if (!op) {
+            return
+        }
+        const view = tabViews.byId[Number(op.tabId || 0)]
+        if (view && view.cancelDownload) {
+            view.cancelDownload(Number(op.opId || 0))
         }
     }
 
@@ -5112,8 +5181,15 @@ ApplicationWindow {
                     }
 
                     onWebMessageReceived: (json) => root.handleWebMessage(tabId, json, tabWeb)
-                    onDownloadStarted: (uri, resultFilePath) => root.handleDownloadStarted(uri, resultFilePath)
-                    onDownloadFinished: (uri, resultFilePath, success) => root.handleDownloadFinished(uri, resultFilePath, success)
+                    onDownloadStarted: (downloadOperationId, uri, resultFilePath, totalBytes) => {
+                        root.handleDownloadStarted(tabId, downloadOperationId, uri, resultFilePath, totalBytes)
+                    }
+                    onDownloadProgress: (downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason) => {
+                        root.handleDownloadProgress(tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason)
+                    }
+                    onDownloadFinished: (downloadOperationId, uri, resultFilePath, success, interruptReason) => {
+                        root.handleDownloadFinished(tabId, downloadOperationId, uri, resultFilePath, success, interruptReason)
+                    }
 
                         Rectangle {
                             anchors.fill: parent
@@ -5951,6 +6027,7 @@ ApplicationWindow {
 
         DownloadsDialog {
             downloads: root.downloadsModel
+            downloadController: root
             onCloseRequested: overlayHost.hide()
         }
     }
@@ -6000,6 +6077,7 @@ ApplicationWindow {
             DownloadsDialog {
                 anchors.fill: parent
                 downloads: root.downloadsModel
+                downloadController: root
                 embedded: true
                 onCloseRequested: popupManager.close()
             }
@@ -6071,6 +6149,7 @@ ApplicationWindow {
 
         DownloadsDialog {
             downloads: root.downloadsModel
+            downloadController: root
             embedded: true
             onCloseRequested: root.sidebarPanel = "tabs"
         }

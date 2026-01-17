@@ -27,6 +27,7 @@
 #include "../core/BookmarksStore.h"
 #include "../core/CommandBus.h"
 #include "../core/DiagnosticsController.h"
+#include "../core/DownloadFilterModel.h"
 #include "../core/DownloadModel.h"
 #include "../core/HistoryFilterModel.h"
 #include "../core/HistoryStore.h"
@@ -337,6 +338,7 @@ int main(int argc, char* argv[])
   qmlRegisterType<TabFilterModel>("XBrowser", 1, 0, "TabFilterModel");
   qmlRegisterType<TabSwitcherModel>("XBrowser", 1, 0, "TabSwitcherModel");
   qmlRegisterType<BookmarksFilterModel>("XBrowser", 1, 0, "BookmarksFilterModel");
+  qmlRegisterType<DownloadFilterModel>("XBrowser", 1, 0, "DownloadFilterModel");
   qmlRegisterType<HistoryFilterModel>("XBrowser", 1, 0, "HistoryFilterModel");
 
   BrowserController browser;

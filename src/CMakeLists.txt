@@ -8,6 +8,7 @@ qt_add_executable(xbrowser
   core/BookmarksStore.cpp
   core/CommandBus.cpp
   core/DiagnosticsController.cpp
+  core/DownloadFilterModel.cpp
   core/DownloadModel.cpp
   core/ExtensionsStore.cpp
   core/HistoryFilterModel.cpp
