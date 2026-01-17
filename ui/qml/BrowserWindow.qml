@@ -5738,6 +5738,10 @@ ApplicationWindow {
                 root.openOverlay(themesDialogComponent, "themes")
                 return
             }
+            if (id === "open-clear-data") {
+                root.openOverlay(clearDataDialogComponent, "clear-data")
+                return
+            }
             if (id === "open-extensions") {
                 root.openOverlay(extensionsDialogComponent, "extensions")
                 return
@@ -5785,6 +5789,18 @@ ApplicationWindow {
         ThemesDialog {
             themes: root.themesModel
             settings: root.browserModel.settings
+            onCloseRequested: overlayHost.hide()
+        }
+    }
+
+    Component {
+        id: clearDataDialogComponent
+
+        ClearDataDialog {
+            view: root.focusedView
+            history: root.historyModel
+            downloads: root.downloadsModel
+            sitePermissions: sitePermissions
             onCloseRequested: overlayHost.hide()
         }
     }

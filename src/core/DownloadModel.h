@@ -33,6 +33,8 @@ public:
   Q_INVOKABLE void addStarted(const QString& uri, const QString& filePath);
   Q_INVOKABLE void markFinished(const QString& uri, const QString& filePath, bool success);
   Q_INVOKABLE void clearFinished();
+  Q_INVOKABLE void clearAll();
+  Q_INVOKABLE void clearRange(qint64 fromMs, qint64 toMs);
   Q_INVOKABLE void openFile(int downloadId);
   Q_INVOKABLE void openFolder(int downloadId);
   Q_INVOKABLE void openLatestFinishedFile();

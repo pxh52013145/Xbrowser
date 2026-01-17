@@ -70,6 +70,11 @@ QString hresultMessage(HRESULT hr)
   return QStringLiteral("%1 (%2)").arg(hex, message);
 }
 
+double msToUnixSeconds(qint64 ms)
+{
+  return static_cast<double>(ms) / 1000.0;
+}
+
 struct SharedWebView2EnvironmentState
 {
   Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment;
@@ -407,6 +412,85 @@ void WebView2View::printToPdf(const QString& filePath)
 
   if (FAILED(hr)) {
     emit printToPdfFinished(trimmed, false, hresultMessage(hr));
+  }
+}
+
+void WebView2View::clearBrowsingData(int dataKinds, qint64 fromMs, qint64 toMs)
+{
+  if (!m_webView) {
+    emit browsingDataCleared(dataKinds, false, QStringLiteral("WebView2 is not initialized."));
+    return;
+  }
+
+  Microsoft::WRL::ComPtr<ICoreWebView2_13> webView13;
+  HRESULT hr = m_webView.As(&webView13);
+  if (FAILED(hr) || !webView13) {
+    emit browsingDataCleared(dataKinds, false, QStringLiteral("Profile is unavailable in this WebView2 version."));
+    return;
+  }
+
+  Microsoft::WRL::ComPtr<ICoreWebView2Profile> profile;
+  hr = webView13->get_Profile(&profile);
+  if (FAILED(hr) || !profile) {
+    emit browsingDataCleared(dataKinds, false, hresultMessage(hr));
+    return;
+  }
+
+  Microsoft::WRL::ComPtr<ICoreWebView2Profile2> profile2;
+  hr = profile.As(&profile2);
+  if (FAILED(hr) || !profile2) {
+    emit browsingDataCleared(dataKinds, false, QStringLiteral("Clear browsing data is unavailable in this WebView2 version."));
+    return;
+  }
+
+  const COREWEBVIEW2_BROWSING_DATA_KINDS kinds = static_cast<COREWEBVIEW2_BROWSING_DATA_KINDS>(dataKinds);
+  const QPointer<WebView2View> self(this);
+
+  HRESULT callResult = E_FAIL;
+  if (fromMs > 0 && toMs > fromMs) {
+    callResult = profile2->ClearBrowsingDataInTimeRange(
+      kinds,
+      msToUnixSeconds(fromMs),
+      msToUnixSeconds(toMs),
+      Callback<ICoreWebView2ClearBrowsingDataCompletedHandler>([self, dataKinds](HRESULT errorCode) -> HRESULT {
+        const bool ok = SUCCEEDED(errorCode);
+        const QString err = ok ? QString() : hresultMessage(errorCode);
+        if (!self) {
+          return S_OK;
+        }
+        QMetaObject::invokeMethod(
+          self,
+          [self, dataKinds, ok, err] {
+            if (self) {
+              emit self->browsingDataCleared(dataKinds, ok, err);
+            }
+          },
+          Qt::QueuedConnection);
+        return S_OK;
+      }).Get());
+  } else {
+    callResult = profile2->ClearBrowsingData(
+      kinds,
+      Callback<ICoreWebView2ClearBrowsingDataCompletedHandler>([self, dataKinds](HRESULT errorCode) -> HRESULT {
+        const bool ok = SUCCEEDED(errorCode);
+        const QString err = ok ? QString() : hresultMessage(errorCode);
+        if (!self) {
+          return S_OK;
+        }
+        QMetaObject::invokeMethod(
+          self,
+          [self, dataKinds, ok, err] {
+            if (self) {
+              emit self->browsingDataCleared(dataKinds, ok, err);
+            }
+          },
+          Qt::QueuedConnection);
+        return S_OK;
+      }).Get());
+  }
+
+  if (FAILED(callResult)) {
+    emit browsingDataCleared(dataKinds, false, hresultMessage(callResult));
   }
 }
 

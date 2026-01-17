@@ -68,6 +68,7 @@ public:
   Q_INVOKABLE void executeScript(const QString& script);
   Q_INVOKABLE void postWebMessageAsJson(const QString& json);
   Q_INVOKABLE void respondToPermissionRequest(int requestId, int state, bool remember);
+  Q_INVOKABLE void clearBrowsingData(int dataKinds, qint64 fromMs, qint64 toMs);
 
 signals:
   void initializedChanged();
@@ -93,6 +94,7 @@ signals:
   void permissionRequested(int requestId, const QString& origin, int kind, bool userInitiated);
   void focusReceived();
   void printToPdfFinished(const QString& filePath, bool success, const QString& error);
+  void browsingDataCleared(int dataKinds, bool success, const QString& error);
 
 private:
   void handleWindowChanged(QQuickWindow* window);

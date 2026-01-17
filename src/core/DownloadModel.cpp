@@ -125,6 +125,51 @@ void DownloadModel::clearFinished()
   }
 }
 
+void DownloadModel::clearAll()
+{
+  if (m_entries.isEmpty() && m_nextId == 1) {
+    return;
+  }
+
+  beginResetModel();
+  m_entries.clear();
+  m_nextId = 1;
+  endResetModel();
+
+  updateActiveCount();
+}
+
+void DownloadModel::clearRange(qint64 fromMs, qint64 toMs)
+{
+  if (fromMs <= 0 || toMs <= 0 || toMs <= fromMs) {
+    return;
+  }
+  if (m_entries.isEmpty()) {
+    return;
+  }
+
+  QVector<Entry> kept;
+  kept.reserve(m_entries.size());
+
+  for (const Entry& entry : m_entries) {
+    const qint64 startedAt = entry.startedAtMs;
+    if (startedAt >= fromMs && startedAt < toMs) {
+      continue;
+    }
+    kept.push_back(entry);
+  }
+
+  if (kept.size() == m_entries.size()) {
+    return;
+  }
+
+  beginResetModel();
+  m_entries = std::move(kept);
+  endResetModel();
+
+  updateActiveCount();
+}
+
 void DownloadModel::openFile(int downloadId)
 {
   const int idx = findIndexById(downloadId);

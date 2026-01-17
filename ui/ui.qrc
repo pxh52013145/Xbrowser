@@ -16,6 +16,7 @@
     <file>qml/components/FindBar.qml</file>
     <file>qml/components/TabSwitcher.qml</file>
     <file>qml/components/SettingsDialog.qml</file>
+    <file>qml/components/ClearDataDialog.qml</file>
     <file>qml/components/ShortcutsEditor.qml</file>
     <file>qml/components/BookmarksPanel.qml</file>
     <file>qml/components/HistoryPanel.qml</file>

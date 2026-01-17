@@ -61,9 +61,32 @@ private slots:
     QCOMPARE(store.decision(QStringLiteral("https://a.example"), 2), 0);
     QCOMPARE(store.decision(QStringLiteral("https://b.example"), 2), 1);
   }
+
+  void clearAll_removesAllOrigins()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    SitePermissionsStore& store = SitePermissionsStore::instance();
+    store.reload();
+    store.clearAll();
+
+    store.setDecision(QStringLiteral("https://a.example/path"), 1, 1);
+    store.setDecision(QStringLiteral("https://b.example/path"), 1, 2);
+    QCOMPARE(store.decision(QStringLiteral("https://a.example"), 1), 1);
+    QCOMPARE(store.decision(QStringLiteral("https://b.example"), 1), 2);
+
+    store.clearAll();
+    QCOMPARE(store.decision(QStringLiteral("https://a.example"), 1), 0);
+    QCOMPARE(store.decision(QStringLiteral("https://b.example"), 1), 0);
+
+    store.reload();
+    QCOMPARE(store.decision(QStringLiteral("https://a.example"), 1), 0);
+    QCOMPARE(store.decision(QStringLiteral("https://b.example"), 1), 0);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSitePermissionsStore)
 
 #include "TestSitePermissionsStore.moc"
-

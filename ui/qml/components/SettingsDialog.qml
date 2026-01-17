@@ -16,6 +16,7 @@ Item {
     readonly property var sections: [
         { title: "Appearance" },
         { title: "Running" },
+        { title: "Privacy" },
         { title: "Shortcuts" },
         { title: "About" },
     ]
@@ -291,6 +292,45 @@ Item {
                                     checked: root.settings ? root.settings.closeTabOnBackNoHistory : true
                                     onToggled: if (root.settings) root.settings.closeTabOnBackNoHistory = checked
                                 }
+                            }
+                        }
+                    }
+
+                    // Privacy
+                    Flickable {
+                        clip: true
+                        contentWidth: width
+                        contentHeight: privacyColumn.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+                        interactive: contentHeight > height
+
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: privacyColumn
+                            width: parent.width
+                            spacing: theme.spacing
+
+                            Label { text: "Privacy"; font.bold: true; font.pixelSize: 14 }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Clear browsing data for the selected time range."
+                                wrapMode: Text.Wrap
+                                opacity: 0.8
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Button {
+                                    text: "Clear browsing dataâ€¦"
+                                    onClicked: commands.invoke("open-clear-data")
+                                }
+
+                                Item { Layout.fillWidth: true }
                             }
                         }
                     }

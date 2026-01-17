@@ -1,5 +1,7 @@
 #include <QtTest/QtTest>
 
+#include <QDateTime>
+
 #include "core/DownloadModel.h"
 
 class TestDownloadModel final : public QObject
@@ -38,9 +40,34 @@ private slots:
     QCOMPARE(model.rowCount(), 1);
     QCOMPARE(model.activeCount(), 1);
   }
+
+  void clearAll_resetsEntries()
+  {
+    DownloadModel model;
+    model.addStarted("https://a", "a.bin");
+    model.markFinished("https://a", "a.bin", true);
+    QCOMPARE(model.rowCount(), 1);
+
+    model.clearAll();
+    QCOMPARE(model.rowCount(), 0);
+    QCOMPARE(model.activeCount(), 0);
+  }
+
+  void clearRange_removesEntriesInRange()
+  {
+    DownloadModel model;
+    const qint64 fromMs = QDateTime::currentMSecsSinceEpoch() - 60'000;
+
+    model.addStarted("https://a", "a.bin");
+    model.addStarted("https://b", "b.bin");
+    QCOMPARE(model.rowCount(), 2);
+
+    const qint64 toMs = QDateTime::currentMSecsSinceEpoch() + 60'000;
+    model.clearRange(fromMs, toMs);
+    QCOMPARE(model.rowCount(), 0);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestDownloadModel)
 
 #include "TestDownloadModel.moc"
-
