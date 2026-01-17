@@ -179,6 +179,60 @@ int SplitViewController::paneIndexForTabId(int tabId) const
   return -1;
 }
 
+bool SplitViewController::openUrlInNewPane(const QUrl& url)
+{
+  if (!m_browser) {
+    return false;
+  }
+  if (!url.isValid()) {
+    return false;
+  }
+
+  const bool wasEnabled = m_enabled;
+  if (!m_enabled) {
+    setEnabled(true);
+  }
+
+  const int currentPaneCount = qBound(2, m_paneCount, 4);
+  int targetPane = 1;
+
+  if (wasEnabled) {
+    if (currentPaneCount < 4) {
+      targetPane = currentPaneCount;
+      setPaneCount(currentPaneCount + 1);
+    } else {
+      targetPane = currentPaneCount - 1;
+    }
+  } else {
+    targetPane = 1;
+  }
+
+  int tabId = tabIdForPane(targetPane);
+  if (!tabExists(tabId)) {
+    tabId = (targetPane == 0) ? ensureTabExists() : createTabId();
+    if (tabId <= 0) {
+      return false;
+    }
+    setTabIdForPane(targetPane, tabId);
+  }
+
+  TabModel* tabs = m_browser->tabs();
+  if (!tabs) {
+    return false;
+  }
+
+  const int index = tabs->indexOfTabId(tabId);
+  if (index < 0) {
+    return false;
+  }
+
+  tabs->setUrlAt(index, url);
+  tabs->setInitialUrlAt(index, url);
+  m_browser->activateTabById(tabId);
+  setFocusedPane(targetPane);
+  return true;
+}
+
 int SplitViewController::focusedPane() const
 {
   return m_focusedPane;

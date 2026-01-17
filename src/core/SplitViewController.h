@@ -7,6 +7,7 @@
 
 class BrowserController;
 class TabModel;
+class QUrl;
 
 class SplitViewController : public QObject
 {
@@ -43,6 +44,7 @@ public:
   Q_INVOKABLE int tabIdForPane(int pane) const;
   Q_INVOKABLE void setTabIdForPane(int pane, int tabId);
   Q_INVOKABLE int paneIndexForTabId(int tabId) const;
+  Q_INVOKABLE bool openUrlInNewPane(const QUrl& url);
 
   int focusedPane() const;
   void setFocusedPane(int pane);

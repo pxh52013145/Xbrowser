@@ -78,6 +78,44 @@ private slots:
     QVERIFY(split.tabIdForPane(2) != 102);
     QVERIFY(tabs->indexOfTabId(split.tabIdForPane(2)) >= 0);
   }
+
+  void openUrlInNewPane_enablesSplitAndNavigates()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    browser.newTab(QUrl("https://a.example"));
+
+    QVERIFY(!split.enabled());
+    QVERIFY(split.openUrlInNewPane(QUrl("https://b.example")));
+    QVERIFY(split.enabled());
+    QCOMPARE(split.paneCount(), 2);
+    QCOMPARE(split.focusedPane(), 1);
+
+    TabModel* tabs = browser.tabs();
+    QVERIFY(tabs);
+
+    const int secondaryId = split.tabIdForPane(1);
+    QVERIFY(secondaryId > 0);
+    const int secondaryIndex = tabs->indexOfTabId(secondaryId);
+    QVERIFY(secondaryIndex >= 0);
+    QCOMPARE(tabs->urlAt(secondaryIndex), QUrl("https://b.example"));
+    QCOMPARE(tabs->initialUrlAt(secondaryIndex), QUrl("https://b.example"));
+    QCOMPARE(tabs->tabIdAt(tabs->activeIndex()), secondaryId);
+
+    QVERIFY(split.openUrlInNewPane(QUrl("https://c.example")));
+    QCOMPARE(split.paneCount(), 3);
+    QCOMPARE(split.focusedPane(), 2);
+
+    const int thirdId = split.tabIdForPane(2);
+    QVERIFY(thirdId > 0);
+    const int thirdIndex = tabs->indexOfTabId(thirdId);
+    QVERIFY(thirdIndex >= 0);
+    QCOMPARE(tabs->urlAt(thirdIndex), QUrl("https://c.example"));
+    QCOMPARE(tabs->initialUrlAt(thirdIndex), QUrl("https://c.example"));
+    QCOMPARE(tabs->tabIdAt(tabs->activeIndex()), thirdId);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSplitViewController)
