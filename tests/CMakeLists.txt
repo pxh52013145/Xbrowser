@@ -7,7 +7,9 @@ function(xbrowser_add_test target_name)
     ../src/core/BrowserController.cpp
     ../src/core/CommandBus.cpp
     ../src/core/ExtensionsStore.cpp
+    ../src/core/LayoutController.cpp
     ../src/core/NotificationCenter.cpp
+    ../src/core/OmniboxUtils.cpp
     ../src/core/SessionStore.cpp
     ../src/core/SitePermissionsStore.cpp
     ../src/core/SplitViewController.cpp
@@ -74,6 +76,10 @@ xbrowser_add_test(xbrowser_test_settings
   TestAppSettings.cpp
 )
 
+xbrowser_add_test(xbrowser_test_layout
+  TestLayoutController.cpp
+)
+
 xbrowser_add_test(xbrowser_test_backclose
   TestBackClosePolicy.cpp
 )
@@ -125,4 +131,8 @@ xbrowser_add_test(xbrowser_test_shortcut_store
 xbrowser_add_test(xbrowser_test_webpanels
   TestWebPanelsStore.cpp
   ../src/core/WebPanelsStore.cpp
+)
+
+xbrowser_add_test(xbrowser_test_omnibox_utils
+  TestOmniboxUtils.cpp
 )

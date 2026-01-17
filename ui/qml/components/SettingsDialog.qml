@@ -159,6 +159,45 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: theme.spacing
 
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Default zoom"
+                                    opacity: 0.85
+                                }
+
+                                SpinBox {
+                                    from: 25
+                                    to: 500
+                                    stepSize: 5
+                                    editable: true
+                                    value: root.settings ? Math.round((root.settings.defaultZoom || 1.0) * 100) : 100
+                                    onValueModified: if (root.settings) root.settings.defaultZoom = value / 100.0
+                                }
+
+                                Label { text: "%"; opacity: 0.75 }
+
+                                Button {
+                                    text: "Reset"
+                                    onClicked: if (root.settings) root.settings.defaultZoom = 1.0
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Remember zoom per site"
+                                    checked: root.settings ? root.settings.rememberZoomPerSite : false
+                                    onToggled: if (root.settings) root.settings.rememberZoomPerSite = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
                                 CheckBox {
                                     Layout.fillWidth: true
                                     text: "Show address bar"
@@ -176,6 +215,30 @@ Item {
                                     text: "Show menu bar"
                                     checked: root.settings ? root.settings.showMenuBar : false
                                     onToggled: if (root.settings) root.settings.showMenuBar = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Sidebar on right"
+                                    checked: root.settings ? root.settings.sidebarOnRight : false
+                                    onToggled: if (root.settings) root.settings.sidebarOnRight = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Use single toolbar (omnibox in sidebar)"
+                                    checked: root.settings ? root.settings.useSingleToolbar : false
+                                    onToggled: if (root.settings) root.settings.useSingleToolbar = checked
                                 }
                             }
                         }

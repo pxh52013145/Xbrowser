@@ -30,8 +30,10 @@
 #include "../core/DownloadModel.h"
 #include "../core/HistoryFilterModel.h"
 #include "../core/HistoryStore.h"
+#include "../core/LayoutController.h"
 #include "../core/ModsModel.h"
 #include "../core/NotificationCenter.h"
+#include "../core/OmniboxUtils.h"
 #include "../core/QuickLinksModel.h"
 #include "../core/WebPanelsStore.h"
 #include "../core/ShortcutStore.h"
@@ -335,6 +337,9 @@ int main(int argc, char* argv[])
   qmlRegisterType<HistoryFilterModel>("XBrowser", 1, 0, "HistoryFilterModel");
 
   BrowserController browser;
+  LayoutController layoutController;
+  layoutController.setSettings(browser.settings());
+  OmniboxUtils omniboxUtils;
   CommandBus commands;
   ShortcutStore shortcutStore;
   NotificationCenter notifications;
@@ -659,6 +664,8 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
   engine.rootContext()->setContextProperty("history", &history);
   engine.rootContext()->setContextProperty("webPanels", &webPanels);
+  engine.rootContext()->setContextProperty("layoutController", &layoutController);
+  engine.rootContext()->setContextProperty("omniboxUtils", &omniboxUtils);
   engine.rootContext()->setContextProperty("mods", &mods);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("themes", &themes);

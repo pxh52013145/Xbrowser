@@ -17,6 +17,10 @@
 #include <QMetaObject>
 #include <QQuickWindow>
 #include <QUrl>
+#include <QtGlobal>
+
+#include <cmath>
+#include <limits>
 
 using Microsoft::WRL::Callback;
 
@@ -84,6 +88,67 @@ SharedWebView2EnvironmentState& sharedEnvironment()
 QString webView2UserDataDir()
 {
   return QDir(xbrowser::appDataRoot()).filePath("webview2");
+}
+
+constexpr qreal kMinZoomFactor = 0.25;
+constexpr qreal kMaxZoomFactor = 5.0;
+
+qreal clampZoomFactor(qreal zoomFactor)
+{
+  const double value = static_cast<double>(zoomFactor);
+  if (!std::isfinite(value) || value <= 0.0) {
+    return 1.0;
+  }
+  return qBound(kMinZoomFactor, zoomFactor, kMaxZoomFactor);
+}
+
+const QVector<qreal>& zoomSteps()
+{
+  static const QVector<qreal> steps {
+    0.25,
+    0.33,
+    0.5,
+    0.67,
+    0.75,
+    0.9,
+    1.0,
+    1.1,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+  };
+  return steps;
+}
+
+int nearestZoomStepIndex(qreal zoomFactor)
+{
+  const QVector<qreal>& steps = zoomSteps();
+  int bestIndex = 0;
+  qreal bestDelta = std::numeric_limits<qreal>::max();
+
+  const qreal clamped = clampZoomFactor(zoomFactor);
+  for (int i = 0; i < steps.size(); ++i) {
+    const qreal delta = qAbs(steps.at(i) - clamped);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestIndex = i;
+    }
+  }
+
+  return bestIndex;
+}
+
+qreal stepZoomFactor(qreal current, int delta)
+{
+  const QVector<qreal>& steps = zoomSteps();
+  const int idx = nearestZoomStepIndex(current);
+  const int nextIndex = qBound(0, idx + delta, steps.size() - 1);
+  return steps.at(nextIndex);
 }
 
 QUrl normalizeUserInput(const QUrl& input)
@@ -162,6 +227,7 @@ WebView2View::~WebView2View()
   }
   if (m_controller) {
     m_controller->remove_GotFocus(m_gotFocusToken);
+    m_controller->remove_ZoomFactorChanged(m_zoomFactorChangedToken);
     m_controller->Close();
   }
 }
@@ -221,6 +287,11 @@ bool WebView2View::muted() const
   return m_muted;
 }
 
+qreal WebView2View::zoomFactor() const
+{
+  return m_zoomFactor;
+}
+
 Microsoft::WRL::ComPtr<ICoreWebView2> WebView2View::coreWebView() const
 {
   return m_webView;
@@ -246,6 +317,14 @@ void WebView2View::reload()
 {
   if (m_webView) {
     m_webView->Reload();
+  }
+}
+
+void WebView2View::stop()
+{
+  if (m_webView) {
+    m_webView->Stop();
+    setIsLoading(false);
   }
 }
 
@@ -344,6 +423,41 @@ void WebView2View::setMuted(bool muted)
   }
 
   webView8->put_IsMuted(muted ? TRUE : FALSE);
+}
+
+void WebView2View::setZoomFactor(qreal zoomFactor)
+{
+  const qreal clamped = clampZoomFactor(zoomFactor);
+  if (qAbs(m_zoomFactor - clamped) < 0.0001) {
+    return;
+  }
+
+  if (!m_controller) {
+    setZoomFactorValue(clamped);
+    return;
+  }
+
+  const HRESULT hr = m_controller->put_ZoomFactor(static_cast<double>(clamped));
+  if (FAILED(hr)) {
+    return;
+  }
+
+  setZoomFactorValue(clamped);
+}
+
+void WebView2View::zoomIn()
+{
+  setZoomFactor(stepZoomFactor(m_zoomFactor, 1));
+}
+
+void WebView2View::zoomOut()
+{
+  setZoomFactor(stepZoomFactor(m_zoomFactor, -1));
+}
+
+void WebView2View::zoomReset()
+{
+  setZoomFactor(1.0);
 }
 
 void WebView2View::retryInitialize()
@@ -601,6 +715,42 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
         }
 
         setInitError(S_OK, {});
+
+        const qreal requestedZoomFactor = clampZoomFactor(m_zoomFactor);
+
+        double initialZoom = 1.0;
+        if (SUCCEEDED(m_controller->get_ZoomFactor(&initialZoom))) {
+          setZoomFactorValue(clampZoomFactor(static_cast<qreal>(initialZoom)));
+        }
+
+        m_controller->add_ZoomFactorChanged(
+          Callback<ICoreWebView2ZoomFactorChangedEventHandler>(
+            [this](ICoreWebView2Controller* sender, IUnknown*) -> HRESULT {
+              if (!sender) {
+                return S_OK;
+              }
+
+              double zoom = 1.0;
+              if (FAILED(sender->get_ZoomFactor(&zoom))) {
+                return S_OK;
+              }
+
+              const qreal next = clampZoomFactor(static_cast<qreal>(zoom));
+              QMetaObject::invokeMethod(
+                this,
+                [this, next] {
+                  setZoomFactorValue(next);
+                },
+                Qt::QueuedConnection);
+              return S_OK;
+            })
+            .Get(),
+          &m_zoomFactorChangedToken);
+
+        const HRESULT zoomHr = m_controller->put_ZoomFactor(static_cast<double>(requestedZoomFactor));
+        if (SUCCEEDED(zoomHr)) {
+          setZoomFactorValue(requestedZoomFactor);
+        }
 
         m_controller->add_GotFocus(
           Callback<ICoreWebView2FocusChangedEventHandler>(
@@ -1110,6 +1260,16 @@ void WebView2View::setMutedValue(bool muted)
   }
   m_muted = muted;
   emit mutedChanged();
+}
+
+void WebView2View::setZoomFactorValue(qreal zoomFactor)
+{
+  const qreal clamped = clampZoomFactor(zoomFactor);
+  if (qAbs(m_zoomFactor - clamped) < 0.0001) {
+    return;
+  }
+  m_zoomFactor = clamped;
+  emit zoomFactorChanged();
 }
 
 void WebView2View::setInitError(HRESULT code, const QString& message)

@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
+import Qt.labs.platform as Platform
 
 import XBrowser 1.0
 import "components"
@@ -14,52 +16,51 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
 
     property url glanceUrl: ""
-    property bool compactTopHover: false
-    property bool compactSidebarHover: false
-    property bool topBarHovered: false
-    property bool sidebarHovered: false
+    readonly property bool fullscreenActive: visibility === Window.FullScreen
+    property int preFullscreenVisibility: Window.Windowed
 
     Timer {
         id: compactTopEnterTimer
-        interval: 140
+        interval: 120
         repeat: false
-        onTriggered: root.compactTopHover = true
+        onTriggered: layoutController.compactTopHover = true
     }
 
     Timer {
         id: compactTopExitTimer
-        interval: 220
+        interval: 300
         repeat: false
-        onTriggered: root.compactTopHover = false
+        onTriggered: layoutController.compactTopHover = false
     }
 
     Timer {
         id: compactSidebarEnterTimer
-        interval: 140
+        interval: 120
         repeat: false
-        onTriggered: root.compactSidebarHover = true
+        onTriggered: layoutController.compactSidebarHover = true
     }
 
     Timer {
         id: compactSidebarExitTimer
-        interval: 220
+        interval: 300
         repeat: false
-        onTriggered: root.compactSidebarHover = false
+        onTriggered: layoutController.compactSidebarHover = false
+    }
+
+    Timer {
+        id: omniboxUpdateTimer
+        interval: 60
+        repeat: false
+        onTriggered: root.updateOmnibox()
     }
 
     readonly property int windowControlButtonWidth: 46
     readonly property int windowControlButtonHeight: 32
 
-    readonly property bool showTopBar: browser.settings.addressBarVisible
-                                        && (!browser.settings.compactMode || topBarHovered || compactTopHover
-                                            || addressField.activeFocus || (root.popupManagerContext === "omnibox"))
-    readonly property bool showSidebar: browser.settings.sidebarExpanded
-                                        && (!browser.settings.compactMode
-                                            || sidebarHovered
-                                            || compactSidebarHover
-                                            || (root.popupManagerContext && root.popupManagerContext.startsWith("sidebar-tool-")))
+    readonly property bool showTopBar: layoutController.showTopBar
+    readonly property bool showSidebar: layoutController.showSidebar
 
-    readonly property bool sidebarIconOnly: browser.settings.sidebarExpanded && browser.settings.sidebarWidth <= 200
+    readonly property bool sidebarIconOnly: layoutController.sidebarIconOnly
     property string sidebarPanel: "tabs"
 
     readonly property int uiRadius: theme.cornerRadius
@@ -109,6 +110,10 @@ ApplicationWindow {
     property string popupManagerContext: ""
     property string toolWindowManagerContext: ""
     property string overlayHostContext: ""
+
+    onPopupManagerContextChanged: layoutController.popupManagerContext = popupManagerContext
+    onToolWindowManagerContextChanged: layoutController.toolWindowManagerContext = toolWindowManagerContext
+    onFullscreenActiveChanged: layoutController.fullscreen = fullscreenActive
 
     property string extensionsPanelSearch: ""
     property string extensionPopupExtensionId: ""
@@ -200,6 +205,7 @@ ApplicationWindow {
             MenuItem { text: "New Tab"; onTriggered: commands.invoke("new-tab") }
             MenuItem { text: "New Window"; onTriggered: commands.invoke("new-window") }
             MenuItem { text: "New Incognito Window"; onTriggered: commands.invoke("new-incognito-window") }
+            MenuItem { text: "Open File…"; onTriggered: commands.invoke("open-file") }
             MenuItem { text: "Close Tab"; onTriggered: commands.invoke("close-tab") }
             MenuSeparator { }
             MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
@@ -211,6 +217,7 @@ ApplicationWindow {
 
         Menu {
             title: "View"
+            MenuItem { text: root.fullscreenActive ? "Exit Fullscreen" : "Fullscreen"; onTriggered: commands.invoke("toggle-fullscreen") }
             MenuItem { text: "Toggle Sidebar"; onTriggered: commands.invoke("toggle-sidebar") }
             MenuItem { text: "Toggle Address Bar"; onTriggered: commands.invoke("toggle-addressbar") }
             MenuItem { text: "Toggle Compact Mode"; onTriggered: commands.invoke("toggle-compact-mode") }
@@ -227,6 +234,10 @@ ApplicationWindow {
                 onTriggered: commands.invoke("toggle-back-close")
             }
             MenuItem { text: "Toggle Menu Bar"; onTriggered: commands.invoke("toggle-menubar") }
+            MenuSeparator { }
+            MenuItem { text: "Zoom In"; onTriggered: commands.invoke("zoom-in") }
+            MenuItem { text: "Zoom Out"; onTriggered: commands.invoke("zoom-out") }
+            MenuItem { text: "Reset Zoom"; onTriggered: commands.invoke("zoom-reset") }
             MenuSeparator { }
             MenuItem { text: splitView.enabled ? "Unsplit View" : "Split View"; onTriggered: commands.invoke("toggle-split-view") }
         }
@@ -249,6 +260,51 @@ ApplicationWindow {
             title: "Help"
             MenuItem { text: "Welcome"; onTriggered: root.openOverlay(onboardingDialogComponent, "onboarding") }
             MenuItem { text: "About"; onTriggered: toast.showToast("XBrowser " + Qt.application.version) }
+        }
+    }
+
+    function toggleFullscreen() {
+        if (root.visibility === Window.FullScreen) {
+            root.visibility = root.preFullscreenVisibility || Window.Windowed
+            return
+        }
+
+        root.preFullscreenVisibility = root.visibility
+        root.visibility = Window.FullScreen
+    }
+
+    Platform.FileDialog {
+        id: openFileDialog
+        title: "Open File"
+        fileMode: Platform.FileDialog.OpenFile
+        nameFilters: ["Web pages (*.html *.htm)", "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg)", "All files (*)"]
+        onAccepted: {
+            const url = openFileDialog.file
+            if (!url || url.toString().length === 0) {
+                return
+            }
+            if (root.focusedView) {
+                root.focusedView.navigate(url)
+                return
+            }
+            commands.invoke("new-tab", { url: url })
+        }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        onActivated: {
+            if (root.fullscreenActive) {
+                root.toggleFullscreen()
+                return
+            }
+            if (overlayHost.active || popupManager.opened || toolWindowManager.opened) {
+                return
+            }
+            if (!layoutController.addressFieldFocused && root.focusedView && root.focusedView.isLoading) {
+                commands.invoke("nav-stop")
+            }
         }
     }
 
@@ -306,19 +362,41 @@ ApplicationWindow {
         return url.toString()
     }
 
+    function singleToolbarActive() {
+        return browser.settings.useSingleToolbar && browser.settings.sidebarExpanded && !root.sidebarIconOnly
+    }
+
+    function activeAddressField() {
+        return singleToolbarActive() ? sidebarAddressField : addressField
+    }
+
+    function syncAddressFocusState() {
+        const topFocused = addressField && addressField.activeFocus
+        const sidebarFocused = sidebarAddressField && sidebarAddressField.activeFocus
+        layoutController.addressFieldFocused = (topFocused || sidebarFocused) === true
+    }
+
     function syncAddressFieldFromFocused(force) {
         const shouldForce = force === true
-        if (!shouldForce && addressField.activeFocus) {
-            return
-        }
-
         const nextText = currentFocusedUrlString()
-        if (addressField.text === nextText) {
-            return
-        }
 
-        suppressNextOmniboxUpdate = true
-        addressField.text = nextText
+        const fields = [addressField, sidebarAddressField]
+        for (const field of fields) {
+            if (!field) {
+                continue
+            }
+            if (!shouldForce && field.activeFocus) {
+                continue
+            }
+            if (field.text === nextText) {
+                continue
+            }
+
+            if (field.activeFocus) {
+                suppressNextOmniboxUpdate = true
+            }
+            field.text = nextText
+        }
     }
 
     function interpretOmniboxInput(text) {
@@ -359,35 +437,30 @@ ApplicationWindow {
         }
     }
 
-    function fuzzyScore(query, target) {
-        const q = (query || "").toLowerCase()
-        const t = (target || "").toLowerCase()
-        if (!q) {
-            return 0
+    function desiredZoomForUrl(url) {
+        if (!browser || !browser.settings) {
+            return 1.0
         }
 
-        let ti = 0
-        let score = 0
-        for (let qi = 0; qi < q.length; qi++) {
-            const ch = q[qi]
-            const found = t.indexOf(ch, ti)
-            if (found < 0) {
-                return -1
-            }
-            score += found === ti ? 3 : 1
-            ti = found + 1
+        const settings = browser.settings
+        if (settings.zoomForUrl) {
+            return settings.zoomForUrl(url)
         }
-        return score
+
+        return settings.defaultZoom || 1.0
     }
 
-    function matchRange(query, text) {
-        const q = (query || "").trim().toLowerCase()
-        const t = (text || "")
-        if (!q || !t) {
-            return { start: -1, length: 0 }
+    function applyZoomForView(view) {
+        if (!view) {
+            return
         }
-        const idx = t.toLowerCase().indexOf(q)
-        return idx >= 0 ? { start: idx, length: q.length } : { start: -1, length: 0 }
+
+        const desired = desiredZoomForUrl(view.currentUrl)
+        const current = view.zoomFactor || 1.0
+        if (Math.abs(current - desired) < 0.001) {
+            return
+        }
+        view.zoomFactor = desired
     }
 
     function syncTabViews() {
@@ -474,6 +547,58 @@ ApplicationWindow {
 
         popupManager.openAtItem(extensionPopupComponent, anchorItem)
         root.popupManagerContext = "extension-popup"
+    }
+
+    function toggleTopBarPopup(contextId, component, anchorItem) {
+        const ctx = String(contextId || "").trim()
+        if (!ctx || !component || !anchorItem) {
+            return
+        }
+
+        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
+        if (hasPopup && root.popupManagerContext === ctx) {
+            popupManager.close()
+            return
+        }
+
+        if (hasPopup) {
+            popupManager.close()
+        }
+
+        root.popupManagerContext = ctx
+        Qt.callLater(() => {
+            if (root.popupManagerContext !== ctx) {
+                return
+            }
+            popupManager.openAtItem(component, anchorItem)
+            root.popupManagerContext = ctx
+        })
+    }
+
+    function toggleTabSwitcherPopup() {
+        const ctx = "tab-switcher"
+
+        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
+        if (hasPopup && root.popupManagerContext === ctx) {
+            popupManager.close()
+            return
+        }
+
+        if (hasPopup) {
+            popupManager.close()
+        }
+
+        root.popupManagerContext = ctx
+        Qt.callLater(() => {
+            if (root.popupManagerContext !== ctx) {
+                return
+            }
+            const w = 620
+            const x = Math.max(8, Math.round((root.width - w) / 2))
+            const y = Math.round(topBar.height + 24)
+            popupManager.openAtPoint(tabSwitcherComponent, x, y, root)
+            root.popupManagerContext = ctx
+        })
     }
 
     function toggleSidebarToolPopup(toolId, component, anchorItem) {
@@ -1123,12 +1248,13 @@ ApplicationWindow {
     }
 
     function openOmniboxPopup() {
-        const trimmed = String(addressField.text || "").trim()
+        const field = activeAddressField()
+        const trimmed = String(field && field.text || "").trim()
         if (trimmed.length === 0) {
             return
         }
 
-        const pos = addressField.mapToItem(popupManager, 0, addressField.height)
+        const pos = field.mapToItem(popupManager, 0, field.height)
         popupManager.openAtPoint(omniboxPopupComponent, pos.x, pos.y)
         root.popupManagerContext = "omnibox"
     }
@@ -1151,8 +1277,15 @@ ApplicationWindow {
         root.overlayHostContext = context || ""
     }
 
+    function scheduleOmniboxUpdate() {
+        omniboxUpdateTimer.stop()
+        omniboxUpdateTimer.start()
+    }
+
     function updateOmnibox() {
-        if (!addressField.activeFocus) {
+        omniboxUpdateTimer.stop()
+        const field = activeAddressField()
+        if (!field || !field.activeFocus) {
             return
         }
 
@@ -1161,7 +1294,7 @@ ApplicationWindow {
             return
         }
 
-        const raw = addressField.text || ""
+        const raw = field.text || ""
         omniboxQuery = raw
 
         const trimmed = raw.trim()
@@ -1174,7 +1307,7 @@ ApplicationWindow {
             return
         }
 
-            const isCommandMode = trimmed.startsWith(">")
+        const isCommandMode = trimmed.startsWith(">")
         if (isCommandMode) {
             const query = trimmed.slice(1).trim()
             const baseCommands = [
@@ -1186,11 +1319,17 @@ ApplicationWindow {
                 { group: "Tabs", title: "Duplicate Tab", command: "duplicate-tab", args: { tabId: root.focusedTabId }, shortcut: "" },
                 { group: "Tabs", title: "Switch Tab", command: "open-tab-switcher", args: {}, shortcut: "Ctrl+K" },
                 { group: "Navigation", title: "Reload", command: "nav-reload", args: {}, shortcut: "Ctrl+R" },
+                { group: "Navigation", title: "Stop Loading", command: "nav-stop", args: {}, shortcut: "Esc" },
                 { group: "Navigation", title: "Find in Page", command: "open-find", args: {}, shortcut: "Ctrl+F" },
                  { group: "View", title: "Toggle Sidebar", command: "toggle-sidebar", args: {}, shortcut: "Ctrl+B" },
                  { group: "View", title: "Toggle Address Bar", command: "toggle-addressbar", args: {}, shortcut: "Ctrl+Shift+L" },
+                 { group: "View", title: root.fullscreenActive ? "Exit Fullscreen" : "Fullscreen", command: "toggle-fullscreen", args: {}, shortcut: "F11" },
+                 { group: "View", title: "Zoom In", command: "zoom-in", args: {}, shortcut: "Ctrl++" },
+                 { group: "View", title: "Zoom Out", command: "zoom-out", args: {}, shortcut: "Ctrl+-" },
+                 { group: "View", title: "Reset Zoom", command: "zoom-reset", args: {}, shortcut: "Ctrl+0" },
                  { group: "View", title: splitView.enabled ? "Unsplit View" : "Split View", command: "toggle-split-view", args: {}, shortcut: "Ctrl+E" },
                  { group: "Tools", title: "Settings", command: "open-settings", args: {}, shortcut: "Ctrl+," },
+                 { group: "Tools", title: "Open File", command: "open-file", args: {}, shortcut: "Ctrl+O" },
                  { group: "Output", title: "Print / Save PDF", command: "open-print", args: {}, shortcut: "Ctrl+P" },
                  { group: "Tools", title: "Downloads", command: "open-downloads", args: {}, shortcut: "Ctrl+J" },
                  { group: "Tools", title: "Bookmarks", command: "open-bookmarks", args: {}, shortcut: "Ctrl+D" },
@@ -1214,7 +1353,7 @@ ApplicationWindow {
 
             const rows = []
             for (const cmd of baseCommands) {
-                const score = fuzzyScore(query, cmd.title)
+                const score = omniboxUtils.fuzzyScore(query, cmd.title)
                 if (score >= 0) {
                     rows.push({ score: score, cmd: cmd })
                 }
@@ -1238,7 +1377,7 @@ ApplicationWindow {
                 }
                 omniboxModel.append({ type: "header", title: g })
                 for (const item of items.slice(0, 12)) {
-                    const range = matchRange(query, item.title)
+                    const range = omniboxUtils.matchRange(query, item.title)
                     omniboxModel.append({
                         type: "item",
                         kind: "command",
@@ -1270,7 +1409,7 @@ ApplicationWindow {
             return
         }
 
-        if (raw === focusedUrl && addressField.selectedText && addressField.selectedText.length === raw.length) {
+        if (raw === focusedUrl && field.selectedText && field.selectedText.length === raw.length) {
             root.closeOmniboxPopup()
             return
         }
@@ -1289,34 +1428,44 @@ ApplicationWindow {
             matchLength: 0,
         })
 
-        const tabHits = []
-        const tabQuery = trimmed.toLowerCase()
-        for (let i = 0; i < browser.tabs.count(); i++) {
-            const title = browser.tabs.titleAt(i) || ""
-            const url = browser.tabs.urlAt(i)
-            const urlText = url ? url.toString() : ""
-            const hay = (title + " " + urlText).toLowerCase()
-            if (!tabQuery || hay.includes(tabQuery)) {
-                tabHits.push({
-                    tabId: browser.tabs.tabIdAt(i),
-                    title: title.length > 0 ? title : urlText,
-                    subtitle: urlText,
-                    faviconUrl: browser.tabs.faviconUrlAt ? browser.tabs.faviconUrlAt(i) : "",
-                    range: matchRange(trimmed, title.length > 0 ? title : urlText),
+        const bookmarkHits = omniboxUtils.bookmarkSuggestions(bookmarksModel, trimmed, 6)
+        if (bookmarkHits && bookmarkHits.length > 0) {
+            omniboxModel.append({ type: "header", title: "Bookmarks" })
+            for (const b of bookmarkHits) {
+                omniboxModel.append({
+                    type: "item",
+                    kind: "bookmark",
+                    title: b.title,
+                    subtitle: b.subtitle,
+                    url: b.url,
+                    shortcut: "",
+                    matchStart: b.matchStart,
+                    matchLength: b.matchLength,
                 })
             }
         }
-        tabHits.sort((a, b) => {
-            const ai = browser.tabs.indexOfTabId ? browser.tabs.indexOfTabId(a.tabId) : -1
-            const bi = browser.tabs.indexOfTabId ? browser.tabs.indexOfTabId(b.tabId) : -1
-            const at = ai >= 0 && browser.tabs.lastActivatedMsAt ? browser.tabs.lastActivatedMsAt(ai) : 0
-            const bt = bi >= 0 && browser.tabs.lastActivatedMsAt ? browser.tabs.lastActivatedMsAt(bi) : 0
-            return bt - at
-        })
 
-        if (tabHits.length > 0) {
+        const historyHits = omniboxUtils.historySuggestions(historyModel, trimmed, 6)
+        if (historyHits && historyHits.length > 0) {
+            omniboxModel.append({ type: "header", title: "History" })
+            for (const h of historyHits) {
+                omniboxModel.append({
+                    type: "item",
+                    kind: "history",
+                    title: h.title,
+                    subtitle: h.subtitle,
+                    url: h.url,
+                    shortcut: "",
+                    matchStart: h.matchStart,
+                    matchLength: h.matchLength,
+                })
+            }
+        }
+
+        const tabHits = omniboxUtils.tabSuggestions(browser.tabs, trimmed, 8)
+        if (tabHits && tabHits.length > 0) {
             omniboxModel.append({ type: "header", title: "Tabs" })
-            for (const t of tabHits.slice(0, 8)) {
+            for (const t of tabHits) {
                 omniboxModel.append({
                     type: "item",
                     kind: "tab",
@@ -1325,39 +1474,25 @@ ApplicationWindow {
                     tabId: t.tabId,
                     faviconUrl: t.faviconUrl,
                     shortcut: "",
-                    matchStart: t.range.start,
-                    matchLength: t.range.length,
+                    matchStart: t.matchStart,
+                    matchLength: t.matchLength,
                 })
             }
         }
 
-        const wsHits = []
-        for (let i = 0; i < browser.workspaces.count(); i++) {
-            const name = browser.workspaces.nameAt(i) || ""
-            const score = fuzzyScore(trimmed, name)
-            if (score >= 0) {
-                wsHits.push({
-                    score: score,
-                    index: i,
-                    title: name,
-                    shortcut: i < 9 ? ("Alt+" + (i + 1)) : "",
-                    range: matchRange(trimmed, name),
-                })
-            }
-        }
-        wsHits.sort((a, b) => b.score - a.score)
-        if (wsHits.length > 0) {
+        const wsHits = omniboxUtils.workspaceSuggestions(browser.workspaces, trimmed, 6)
+        if (wsHits && wsHits.length > 0) {
             omniboxModel.append({ type: "header", title: "Workspaces" })
-            for (const ws of wsHits.slice(0, 6)) {
+            for (const ws of wsHits) {
                 omniboxModel.append({
                     type: "item",
                     kind: "workspace",
                     title: ws.title,
                     subtitle: "Switch workspace",
-                    workspaceIndex: ws.index,
+                    workspaceIndex: ws.workspaceIndex,
                     shortcut: ws.shortcut,
-                    matchStart: ws.range.start,
-                    matchLength: ws.range.length,
+                    matchStart: ws.matchStart,
+                    matchLength: ws.matchLength,
                 })
             }
         }
@@ -1440,6 +1575,44 @@ ApplicationWindow {
                         popupManager.close()
                         commands.invoke("open-devtools")
                     }
+                }
+
+                Button {
+                    text: root.fullscreenActive ? "Exit Fullscreen" : "Fullscreen"
+                    onClicked: {
+                        popupManager.close()
+                        commands.invoke("toggle-fullscreen")
+                    }
+                }
+
+                Button {
+                    text: "Open File…"
+                    onClicked: {
+                        popupManager.close()
+                        commands.invoke("open-file")
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Zoom In"
+                        onClicked: commands.invoke("zoom-in")
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Zoom Out"
+                        onClicked: commands.invoke("zoom-out")
+                    }
+                }
+
+                Button {
+                    text: "Reset Zoom"
+                    onClicked: commands.invoke("zoom-reset")
                 }
 
                 Button {
@@ -1566,9 +1739,7 @@ ApplicationWindow {
 
                 Button {
                     text: "Permissions"
-                    onClicked: {
-                        popupManager.openAtItem(sitePermissionsPanelComponent, sitePanelButton)
-                    }
+                    onClicked: root.toggleTopBarPopup("site-permissions", sitePermissionsPanelComponent, sitePanelButton)
                 }
 
                 Button {
@@ -2069,6 +2240,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        layoutController.fullscreen = root.fullscreenActive
         windowChrome.attach(root)
         windowChrome.setCaptionItem(topBar)
         windowChrome.setCaptionExcludeItems([
@@ -2139,14 +2311,21 @@ ApplicationWindow {
     header: ToolBar {
         id: topBar
         readonly property int expandedHeight: 56
-        height: showTopBar ? expandedHeight : root.windowControlButtonHeight
+        height: showTopBar ? expandedHeight : (root.fullscreenActive ? 0 : root.windowControlButtonHeight)
         leftPadding: 6
         rightPadding: 0
         topPadding: 0
         bottomPadding: 0
 
+        Behavior on height {
+            NumberAnimation {
+                duration: browser.settings.reduceMotion ? 0 : theme.motionNormalMs
+                easing.type: Easing.InOutCubic
+            }
+        }
+
         HoverHandler {
-            onHoveredChanged: root.topBarHovered = hovered
+            onHoveredChanged: layoutController.topBarHovered = hovered
         }
 
         RowLayout {
@@ -2177,15 +2356,15 @@ ApplicationWindow {
             ToolButton {
                 id: reloadButton
                 visible: showTopBar
-                text: (root.focusedView && root.focusedView.isLoading) ? "⟳…" : "⟳"
-                onClicked: commands.invoke("nav-reload")
+                text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
+                onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
             }
 
             ToolButton {
                 id: sitePanelButton
                 visible: showTopBar
                 text: "ⓘ"
-                onClicked: popupManager.openAtItem(sitePanelComponent, sitePanelButton)
+                onClicked: root.toggleTopBarPopup("site-panel", sitePanelComponent, sitePanelButton)
             }
 
             TextField {
@@ -2197,13 +2376,16 @@ ApplicationWindow {
                 Layout.maximumWidth: 800
                 placeholderText: "Search or enter address"
                 selectByMouse: true
-                onTextChanged: updateOmnibox()
+                onTextChanged: scheduleOmniboxUpdate()
                 onActiveFocusChanged: {
+                    root.syncAddressFocusState()
                     if (activeFocus) {
                         Qt.callLater(() => addressField.selectAll())
                         return
                     }
-                    root.closeOmniboxPopup()
+                    if (!layoutController.addressFieldFocused) {
+                        root.closeOmniboxPopup()
+                    }
                 }
                 onAccepted: {
                     if (root.omniboxPopupOpen()) {
@@ -2276,6 +2458,20 @@ ApplicationWindow {
             }
 
             ToolButton {
+                id: zoomIndicatorButton
+                visible: showTopBar && root.focusedView && Math.abs((root.focusedView.zoomFactor || 1.0) - 1.0) > 0.001
+                text: {
+                    const view = root.focusedView
+                    const factor = view ? (view.zoomFactor || 1.0) : 1.0
+                    return Math.round(factor * 100) + "%"
+                }
+                onClicked: commands.invoke("zoom-reset")
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: "Reset zoom"
+            }
+
+            ToolButton {
                 id: bookmarkButton
                 visible: showTopBar
                 text: {
@@ -2310,7 +2506,7 @@ ApplicationWindow {
                 id: emojiButton
                 visible: showTopBar
                 text: "😊"
-                onClicked: popupManager.openAtItem(emojiPickerComponent, emojiButton)
+                onClicked: root.toggleTopBarPopup("emoji-picker", emojiPickerComponent, emojiButton)
             }
 
             ToolButton {
@@ -2382,6 +2578,7 @@ ApplicationWindow {
                             onClicked: (mouse) => {
                                 const pos = mapToItem(popupManager, mouse.x, mouse.y)
                                 popupManager.openAtPoint(extensionContextMenuComponent, pos.x, pos.y)
+                                root.popupManagerContext = "extensions-context-menu"
                             }
                         }
                     }
@@ -2400,13 +2597,13 @@ ApplicationWindow {
                 id: downloadsButton
                 visible: showTopBar
                 text: downloads.activeCount > 0 ? ("↓" + downloads.activeCount) : "↓"
-                onClicked: popupManager.openAtItem(downloadsPanelComponent, downloadsButton)
+                onClicked: root.toggleTopBarPopup("downloads-panel", downloadsPanelComponent, downloadsButton)
             }
 
             ToolButton {
                 id: mainMenuButton
                 text: "⋮"
-                onClicked: popupManager.openAtItem(mainMenuComponent, mainMenuButton)
+                onClicked: root.toggleTopBarPopup("main-menu", mainMenuComponent, mainMenuButton)
             }
 
             Row {
@@ -2494,7 +2691,8 @@ ApplicationWindow {
             border.color: Qt.rgba(0, 0, 0, 0.08)
             border.width: 1
 
-            implicitWidth: Math.max(1, addressField.width)
+            readonly property var anchorField: root.activeAddressField()
+            implicitWidth: Math.max(1, (anchorField ? anchorField.width : addressField.width))
             implicitHeight: omniboxView.implicitHeight
             width: implicitWidth
             height: implicitHeight
@@ -2574,30 +2772,40 @@ ApplicationWindow {
                 if (item.kind === "command") {
                     commands.invoke(item.command, item.args || {})
                     root.suppressNextOmniboxUpdate = true
-                    addressField.text = ""
-                    addressField.forceActiveFocus()
+                    const field = root.activeAddressField()
+                    if (field) {
+                        field.text = ""
+                        field.forceActiveFocus()
+                    }
                     return
                 }
 
+                const field = root.activeAddressField()
                 if (item.kind === "tab") {
                     browser.activateTabById(item.tabId)
-                    addressField.focus = false
+                    if (field) {
+                        field.focus = false
+                    }
                     return
                 }
 
                 if (item.kind === "workspace") {
                     commands.invoke("switch-workspace", { index: item.workspaceIndex })
-                    addressField.focus = false
+                    if (field) {
+                        field.focus = false
+                    }
                     return
                 }
 
-                if (item.kind === "url" || item.kind === "search") {
+                if (item.kind === "url" || item.kind === "search" || item.kind === "bookmark" || item.kind === "history") {
                     if (root.focusedView) {
                         root.focusedView.navigate(item.url)
                     } else {
                         commands.invoke("new-tab", { url: item.url })
                     }
-                    addressField.focus = false
+                    if (field) {
+                        field.focus = false
+                    }
                     return
                 }
             }
@@ -2651,7 +2859,15 @@ ApplicationWindow {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: kind === "command" ? ">" : (kind === "tab" ? "T" : (kind === "workspace" ? "W" : (kind === "search" ? "S" : "U")))
+                                    text: kind === "command"
+                                          ? ">"
+                                          : (kind === "tab"
+                                                 ? "T"
+                                                 : (kind === "workspace"
+                                                        ? "W"
+                                                        : (kind === "bookmark"
+                                                               ? "\u2605"
+                                                               : (kind === "history" ? "H" : (kind === "search" ? "S" : "U")))))
                                     opacity: 0.7
                                     font.pixelSize: 10
                                 }
@@ -2781,7 +2997,7 @@ ApplicationWindow {
         anchors.top: parent.top
         height: 6
         hoverEnabled: true
-        visible: browser.settings.compactMode && browser.settings.addressBarVisible
+        visible: (browser.settings.compactMode || root.fullscreenActive) && browser.settings.addressBarVisible
         z: 2000
         onEntered: {
             compactTopExitTimer.stop()
@@ -2796,12 +3012,13 @@ ApplicationWindow {
     }
 
     MouseArea {
-        anchors.left: parent.left
+        anchors.left: browser.settings.sidebarOnRight ? undefined : parent.left
+        anchors.right: browser.settings.sidebarOnRight ? parent.right : undefined
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 6
         hoverEnabled: true
-        visible: browser.settings.compactMode && browser.settings.sidebarExpanded
+        visible: (browser.settings.compactMode || root.fullscreenActive) && browser.settings.sidebarExpanded
         z: 2000
         onEntered: {
             compactSidebarExitTimer.stop()
@@ -2815,12 +3032,15 @@ ApplicationWindow {
         }
     }
 
-    RowLayout {
+    GridLayout {
         anchors.fill: parent
-        spacing: 0
+        columns: 5
+        columnSpacing: 0
+        rowSpacing: 0
 
         Rectangle {
             id: sidebarPane
+            Layout.column: browser.settings.sidebarOnRight ? 4 : 0
             Layout.preferredWidth: showSidebar ? browser.settings.sidebarWidth : 0
             Layout.fillHeight: true
             visible: true
@@ -2843,13 +3063,129 @@ ApplicationWindow {
             }
 
             HoverHandler {
-                onHoveredChanged: root.sidebarHovered = hovered
+                onHoveredChanged: layoutController.sidebarHovered = hovered
             }
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    visible: root.singleToolbarActive() && browser.settings.addressBarVisible
+
+                    ToolButton {
+                        text: "←"
+                        enabled: root.focusedView ? root.focusedView.canGoBack : false
+                        onClicked: commands.invoke("nav-back")
+                    }
+                    ToolButton {
+                        text: "→"
+                        enabled: root.focusedView ? root.focusedView.canGoForward : false
+                        onClicked: commands.invoke("nav-forward")
+                    }
+                    ToolButton {
+                        text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
+                        onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
+                    }
+
+                    TextField {
+                        id: sidebarAddressField
+                        Layout.fillWidth: true
+                        placeholderText: "Search or enter address"
+                        selectByMouse: true
+                        onTextChanged: scheduleOmniboxUpdate()
+                        onActiveFocusChanged: {
+                            root.syncAddressFocusState()
+                            if (activeFocus) {
+                                Qt.callLater(() => sidebarAddressField.selectAll())
+                                return
+                            }
+                            if (!layoutController.addressFieldFocused) {
+                                root.closeOmniboxPopup()
+                            }
+                        }
+                        onAccepted: {
+                            if (root.omniboxPopupOpen()) {
+                                const view = root.currentOmniboxView()
+                                if (view) {
+                                    view.activateCurrent()
+                                }
+                                return
+                            }
+                            if ((text || "").trim().startsWith(">")) {
+                                return
+                            }
+                            root.navigateFromOmnibox(text)
+                            sidebarAddressField.focus = false
+                        }
+
+                        Keys.onPressed: (event) => {
+                            if (event.key === Qt.Key_Down) {
+                                if (!root.omniboxPopupOpen()) {
+                                    updateOmnibox()
+                                    Qt.callLater(() => {
+                                        const view = root.currentOmniboxView()
+                                        if (view) {
+                                            view.currentIndex = view.firstSelectableIndex()
+                                        }
+                                    })
+                                } else {
+                                    const view = root.currentOmniboxView()
+                                    if (view) {
+                                        view.moveSelection(1)
+                                    }
+                                }
+                                event.accepted = true
+                                return
+                            }
+                            if (event.key === Qt.Key_Up) {
+                                const view = root.currentOmniboxView()
+                                if (view) {
+                                    view.moveSelection(-1)
+                                    event.accepted = true
+                                }
+                                return
+                            }
+                            if (event.key === Qt.Key_Tab) {
+                                const view = root.currentOmniboxView()
+                                if (view) {
+                                    view.activateCurrent()
+                                    event.accepted = true
+                                }
+                                return
+                            }
+                        }
+
+                        Keys.onEscapePressed: (event) => {
+                            if (root.omniboxPopupOpen()) {
+                                root.closeOmniboxPopup()
+                                event.accepted = true
+                                return
+                            }
+                            const currentUrl = root.currentFocusedUrlString()
+                            if (sidebarAddressField.text !== currentUrl) {
+                                root.syncAddressFieldFromFocused(true)
+                                Qt.callLater(() => sidebarAddressField.selectAll())
+                                event.accepted = true
+                                return
+                            }
+                            sidebarAddressField.focus = false
+                            event.accepted = true
+                        }
+                    }
+
+                    ToolButton {
+                        visible: root.focusedView && Math.abs((root.focusedView.zoomFactor || 1.0) - 1.0) > 0.001
+                        text: Math.round((root.focusedView.zoomFactor || 1.0) * 100) + "%"
+                        onClicked: commands.invoke("zoom-reset")
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        ToolTip.text: "Reset zoom"
+                    }
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -3801,6 +4137,7 @@ ApplicationWindow {
                                         root.prepareContextMenuSelection(tabId)
                                         const pos = mapToItem(popupManager, mouse.x, mouse.y)
                                         popupManager.openAtPoint(groupTabContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                        root.popupManagerContext = "sidebar-context-menu"
                                     }
                                 }
 
@@ -3947,6 +4284,7 @@ ApplicationWindow {
                                         onClicked: {
                                             root.prepareContextMenuSelection(tabId)
                                             popupManager.openAtItem(groupTabContextMenuComponent, groupMoreButton, sidebarPane)
+                                            root.popupManagerContext = "sidebar-context-menu"
                                         }
 
                                         Behavior on opacity {
@@ -4191,6 +4529,7 @@ ApplicationWindow {
                                 root.prepareContextMenuSelection(tabId)
                                 const pos = mapToItem(popupManager, mouse.x, mouse.y)
                                 popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                root.popupManagerContext = "sidebar-context-menu"
                             }
                         }
 
@@ -4349,6 +4688,7 @@ ApplicationWindow {
                                 onClicked: {
                                     root.prepareContextMenuSelection(tabId)
                                     popupManager.openAtItem(tabContextMenuComponent, moreButton, sidebarPane)
+                                    root.popupManagerContext = "sidebar-context-menu"
                                 }
 
                                 Behavior on opacity {
@@ -4410,11 +4750,13 @@ ApplicationWindow {
                     workspaces: root.browserModel.workspaces
                     settings: root.browserModel.settings
                     popupHost: popupManager
+                    popupContextHost: root
                 }
             }
         }
 
         Rectangle {
+            Layout.column: browser.settings.sidebarOnRight ? 3 : 1
             Layout.preferredWidth: 4
             Layout.fillHeight: true
             visible: showSidebar
@@ -4440,13 +4782,15 @@ ApplicationWindow {
                     if (!pressed) {
                         return
                     }
-                    browser.settings.sidebarWidth = startWidth + Math.round(mouse.sceneX - startSceneX)
+                    const delta = Math.round(mouse.sceneX - startSceneX)
+                    browser.settings.sidebarWidth = browser.settings.sidebarOnRight ? (startWidth - delta) : (startWidth + delta)
                 }
             }
         }
 
         Item {
             id: contentHost
+            Layout.column: 2
             Layout.fillWidth: true
             Layout.fillHeight: true
 
@@ -4574,6 +4918,7 @@ ApplicationWindow {
                         if (tabId === root.focusedTabId) {
                             root.syncAddressFieldFromFocused()
                         }
+                        root.applyZoomForView(tabWeb)
                     }
 
                     onIsLoadingChanged: {
@@ -4590,6 +4935,20 @@ ApplicationWindow {
                         if (store && store.addVisit) {
                             store.addVisit(currentUrl, title)
                         }
+                    }
+
+                    onZoomFactorChanged: {
+                        const settings = browser && browser.settings ? browser.settings : null
+                        if (!settings || !settings.rememberZoomPerSite || !settings.setZoomForUrl) {
+                            return
+                        }
+
+                        const desired = root.desiredZoomForUrl(currentUrl)
+                        if (Math.abs((zoomFactor || 1.0) - desired) < 0.001) {
+                            return
+                        }
+
+                        settings.setZoomForUrl(currentUrl, zoomFactor || 1.0)
                     }
 
                     onDocumentPlayingAudioChanged: {
@@ -4975,6 +5334,7 @@ ApplicationWindow {
         }
 
         Rectangle {
+            Layout.column: browser.settings.sidebarOnRight ? 1 : 3
             Layout.preferredWidth: 4
             Layout.fillHeight: true
             visible: browser.settings.webPanelVisible
@@ -5000,13 +5360,15 @@ ApplicationWindow {
                     if (!pressed) {
                         return
                     }
-                    browser.settings.webPanelWidth = startWidth - Math.round(mouse.sceneX - startSceneX)
+                    const delta = Math.round(mouse.sceneX - startSceneX)
+                    browser.settings.webPanelWidth = browser.settings.sidebarOnRight ? (startWidth + delta) : (startWidth - delta)
                 }
             }
         }
 
         Rectangle {
             id: webPanelPane
+            Layout.column: browser.settings.sidebarOnRight ? 0 : 4
             Layout.preferredWidth: browser.settings.webPanelVisible ? browser.settings.webPanelWidth : 0
             Layout.fillHeight: true
             visible: true
@@ -5246,8 +5608,11 @@ ApplicationWindow {
 
         function onCommandInvoked(id, args) {
             if (id === "focus-address") {
-                addressField.forceActiveFocus()
-                addressField.selectAll()
+                const field = root.activeAddressField()
+                if (field) {
+                    field.forceActiveFocus()
+                    field.selectAll()
+                }
                 return
             }
             if (id === "nav-back") {
@@ -5279,10 +5644,42 @@ ApplicationWindow {
                 }
                 return
             }
+            if (id === "nav-stop") {
+                if (root.focusedView) {
+                    root.focusedView.stop()
+                }
+                return
+            }
             if (id === "navigate") {
                 if (root.focusedView) {
                     root.focusedView.navigate(args.url)
                 }
+                return
+            }
+            if (id === "zoom-in") {
+                if (root.focusedView) {
+                    root.focusedView.zoomIn()
+                }
+                return
+            }
+            if (id === "zoom-out") {
+                if (root.focusedView) {
+                    root.focusedView.zoomOut()
+                }
+                return
+            }
+            if (id === "zoom-reset") {
+                if (root.focusedView) {
+                    root.focusedView.zoomReset()
+                }
+                return
+            }
+            if (id === "open-file") {
+                openFileDialog.open()
+                return
+            }
+            if (id === "toggle-fullscreen") {
+                root.toggleFullscreen()
                 return
             }
             if (id === "open-devtools") {
@@ -5296,7 +5693,7 @@ ApplicationWindow {
                 return
             }
             if (id === "open-downloads") {
-                popupManager.openAtItem(downloadsPanelComponent, downloadsButton)
+                root.toggleTopBarPopup("downloads-panel", downloadsPanelComponent, downloadsButton)
                 return
             }
             if (id === "open-bookmarks") {
@@ -5320,16 +5717,13 @@ ApplicationWindow {
                 }
                 root.toolWindowManagerContext = "find-bar"
                 const x = Math.max(8, Math.round(root.width - 16))
-                const y = Math.round(topBar.height + 12)
+                const expectsExpandedTopBar = browser.settings.addressBarVisible && !root.singleToolbarActive()
+                const y = Math.round((expectsExpandedTopBar ? topBar.expandedHeight : topBar.height) + 12)
                 toolWindowManager.openAtPoint(findBarComponent, x, y, root)
                 return
             }
             if (id === "open-tab-switcher") {
-                root.popupManagerContext = "tab-switcher"
-                const w = 620
-                const x = Math.max(8, Math.round((root.width - w) / 2))
-                const y = Math.round(topBar.height + 24)
-                popupManager.openAtPoint(tabSwitcherComponent, x, y, root)
+                root.toggleTabSwitcherPopup()
                 return
             }
             if (id === "open-print") {

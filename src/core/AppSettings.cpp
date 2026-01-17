@@ -2,6 +2,7 @@
 
 #include "AppPaths.h"
 
+#include <cmath>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -13,6 +14,23 @@ namespace
 QString settingsPath()
 {
   return QDir(xbrowser::appDataRoot()).filePath("settings.json");
+}
+
+constexpr qreal kMinZoomFactor = 0.25;
+constexpr qreal kMaxZoomFactor = 5.0;
+
+qreal clampZoomFactor(qreal zoomFactor)
+{
+  if (!std::isfinite(zoomFactor)) {
+    return 1.0;
+  }
+  return qBound(kMinZoomFactor, zoomFactor, kMaxZoomFactor);
+}
+
+QString zoomHostKey(const QUrl& url)
+{
+  const QString host = url.host().trimmed().toLower();
+  return host;
 }
 }
 
@@ -56,6 +74,36 @@ void AppSettings::setSidebarExpanded(bool expanded)
   }
   m_sidebarExpanded = expanded;
   emit sidebarExpandedChanged();
+  scheduleSave();
+}
+
+bool AppSettings::sidebarOnRight() const
+{
+  return m_sidebarOnRight;
+}
+
+void AppSettings::setSidebarOnRight(bool onRight)
+{
+  if (m_sidebarOnRight == onRight) {
+    return;
+  }
+  m_sidebarOnRight = onRight;
+  emit sidebarOnRightChanged();
+  scheduleSave();
+}
+
+bool AppSettings::useSingleToolbar() const
+{
+  return m_useSingleToolbar;
+}
+
+void AppSettings::setUseSingleToolbar(bool enabled)
+{
+  if (m_useSingleToolbar == enabled) {
+    return;
+  }
+  m_useSingleToolbar = enabled;
+  emit useSingleToolbarChanged();
   scheduleSave();
 }
 
@@ -196,6 +244,78 @@ void AppSettings::setCloseTabOnBackNoHistory(bool enabled)
   scheduleSave();
 }
 
+qreal AppSettings::defaultZoom() const
+{
+  return m_defaultZoom;
+}
+
+void AppSettings::setDefaultZoom(qreal zoom)
+{
+  const qreal clamped = clampZoomFactor(zoom);
+  if (qAbs(m_defaultZoom - clamped) < 0.0001) {
+    return;
+  }
+  m_defaultZoom = clamped;
+  emit defaultZoomChanged();
+  scheduleSave();
+}
+
+bool AppSettings::rememberZoomPerSite() const
+{
+  return m_rememberZoomPerSite;
+}
+
+void AppSettings::setRememberZoomPerSite(bool enabled)
+{
+  if (m_rememberZoomPerSite == enabled) {
+    return;
+  }
+  m_rememberZoomPerSite = enabled;
+  emit rememberZoomPerSiteChanged();
+  scheduleSave();
+}
+
+qreal AppSettings::zoomForUrl(const QUrl& url) const
+{
+  const qreal fallback = clampZoomFactor(m_defaultZoom);
+  if (!m_rememberZoomPerSite) {
+    return fallback;
+  }
+
+  const QString host = zoomHostKey(url);
+  if (host.isEmpty()) {
+    return fallback;
+  }
+
+  const auto it = m_zoomByHost.constFind(host);
+  if (it == m_zoomByHost.constEnd()) {
+    return fallback;
+  }
+
+  return clampZoomFactor(it.value());
+}
+
+void AppSettings::setZoomForUrl(const QUrl& url, qreal zoom)
+{
+  if (!m_rememberZoomPerSite) {
+    return;
+  }
+
+  const QString host = zoomHostKey(url);
+  if (host.isEmpty()) {
+    return;
+  }
+
+  const qreal clamped = clampZoomFactor(zoom);
+  const auto it = m_zoomByHost.constFind(host);
+  if (it != m_zoomByHost.constEnd() && qAbs(it.value() - clamped) < 0.0001) {
+    return;
+  }
+
+  m_zoomByHost.insert(host, clamped);
+  scheduleSave();
+}
+
 int AppSettings::webPanelWidth() const
 {
   return m_webPanelWidth;
@@ -276,11 +396,13 @@ void AppSettings::load()
   const QJsonObject obj = doc.object();
 
   const int version = obj.value("version").toInt(1);
-  const bool needsUpgrade = version < 5;
+  const bool needsUpgrade = version < 6;
 
   const int width = obj.value("sidebarWidth").toInt(m_sidebarWidth);
   m_sidebarWidth = qBound(160, width, 520);
   m_sidebarExpanded = obj.value("sidebarExpanded").toBool(m_sidebarExpanded);
+  m_sidebarOnRight = obj.value("sidebarOnRight").toBool(m_sidebarOnRight);
+  m_useSingleToolbar = obj.value("useSingleToolbar").toBool(m_useSingleToolbar);
   m_addressBarVisible = obj.value("addressBarVisible").toBool(m_addressBarVisible);
   m_essentialCloseResets = obj.value("essentialCloseResets").toBool(m_essentialCloseResets);
   m_compactMode = obj.value("compactMode").toBool(m_compactMode);
@@ -293,6 +415,17 @@ void AppSettings::load()
   m_onboardingSeen = obj.value("onboardingSeen").toBool(m_onboardingSeen);
   m_showMenuBar = obj.value("showMenuBar").toBool(m_showMenuBar);
   m_closeTabOnBackNoHistory = obj.value("closeTabOnBackNoHistory").toBool(m_closeTabOnBackNoHistory);
+  m_defaultZoom = clampZoomFactor(obj.value("defaultZoom").toDouble(m_defaultZoom));
+  m_rememberZoomPerSite = obj.value("rememberZoomPerSite").toBool(m_rememberZoomPerSite);
+
+  m_zoomByHost.clear();
+  const QJsonValue zoomMapValue = obj.value("zoomByHost");
+  if (zoomMapValue.isObject()) {
+    const QJsonObject zoomMap = zoomMapValue.toObject();
+    for (auto it = zoomMap.begin(); it != zoomMap.end(); ++it) {
+      m_zoomByHost.insert(it.key().trimmed().toLower(), clampZoomFactor(it.value().toDouble(1.0)));
+    }
+  }
 
   const int panelWidth = obj.value("webPanelWidth").toInt(m_webPanelWidth);
   m_webPanelWidth = qBound(220, panelWidth, 720);
@@ -328,9 +461,11 @@ bool AppSettings::saveNow(QString* error) const
   }
 
   QJsonObject obj;
-  obj.insert("version", 5);
+  obj.insert("version", 6);
   obj.insert("sidebarWidth", m_sidebarWidth);
   obj.insert("sidebarExpanded", m_sidebarExpanded);
+  obj.insert("sidebarOnRight", m_sidebarOnRight);
+  obj.insert("useSingleToolbar", m_useSingleToolbar);
   obj.insert("addressBarVisible", m_addressBarVisible);
   obj.insert("essentialCloseResets", m_essentialCloseResets);
   obj.insert("compactMode", m_compactMode);
@@ -340,6 +475,14 @@ bool AppSettings::saveNow(QString* error) const
   obj.insert("onboardingSeen", m_onboardingSeen);
   obj.insert("showMenuBar", m_showMenuBar);
   obj.insert("closeTabOnBackNoHistory", m_closeTabOnBackNoHistory);
+  obj.insert("defaultZoom", m_defaultZoom);
+  obj.insert("rememberZoomPerSite", m_rememberZoomPerSite);
+
+  QJsonObject zoomMap;
+  for (auto it = m_zoomByHost.constBegin(); it != m_zoomByHost.constEnd(); ++it) {
+    zoomMap.insert(it.key(), it.value());
+  }
+  obj.insert("zoomByHost", zoomMap);
   obj.insert("webPanelWidth", m_webPanelWidth);
   obj.insert("webPanelVisible", m_webPanelVisible);
   obj.insert("webPanelUrl", m_webPanelUrl.toString());

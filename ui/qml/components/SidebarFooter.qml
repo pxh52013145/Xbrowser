@@ -10,6 +10,7 @@ Item {
     required property var workspaces
     required property var settings
     required property var popupHost
+    required property var popupContextHost
 
     property int renameWorkspaceIndex: -1
     property string renameDraft: ""
@@ -177,7 +178,10 @@ Item {
         ToolButton {
             id: workspaceMenuButton
             text: "⋯"
-            onClicked: root.popupHost.openAtItem(workspaceMenuComponent, workspaceMenuButton)
+            onClicked: {
+                root.popupHost.openAtItem(workspaceMenuComponent, workspaceMenuButton)
+                root.popupContextHost.popupManagerContext = "sidebar-workspace-menu"
+            }
         }
 
         ToolButton {
@@ -213,6 +217,7 @@ Item {
                         }
                         root.renameWorkspaceIndex = root.workspaces.activeIndex
                         root.renameDraft = root.workspaces.nameAt(root.renameWorkspaceIndex)
+                        root.popupContextHost.popupManagerContext = "sidebar-workspace-rename"
                         root.popupHost.openAtItem(renameDialogComponent, workspaceMenuButton)
                     }
                 }

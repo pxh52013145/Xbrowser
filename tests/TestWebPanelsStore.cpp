@@ -68,9 +68,38 @@ private slots:
       QCOMPARE(store.data(store.index(1, 0), WebPanelsStore::TitleRole).toString(), QStringLiteral("One"));
     }
   }
+
+  void updatePanel_renamesAndPersists()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    int panelId = 0;
+    {
+      WebPanelsStore store;
+      store.addPanel(QUrl("https://example.com"), "Example");
+      QCOMPARE(store.count(), 1);
+
+      panelId = store.data(store.index(0, 0), WebPanelsStore::PanelIdRole).toInt();
+      QVERIFY(panelId > 0);
+
+      store.updatePanel(panelId, QUrl("https://example.com"), "Renamed");
+      QCOMPARE(store.data(store.index(0, 0), WebPanelsStore::TitleRole).toString(), QStringLiteral("Renamed"));
+
+      QString error;
+      QVERIFY(store.saveNow(&error));
+      QCOMPARE(error, QString());
+    }
+
+    {
+      WebPanelsStore store;
+      QCOMPARE(store.count(), 1);
+      QCOMPARE(store.data(store.index(0, 0), WebPanelsStore::TitleRole).toString(), QStringLiteral("Renamed"));
+    }
+  }
 };
 
 QTEST_GUILESS_MAIN(TestWebPanelsStore)
 
 #include "TestWebPanelsStore.moc"
-

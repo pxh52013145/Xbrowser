@@ -28,6 +28,7 @@ class WebView2View : public QQuickItem
   Q_PROPERTY(QUrl faviconUrl READ faviconUrl NOTIFY faviconUrlChanged)
   Q_PROPERTY(bool documentPlayingAudio READ documentPlayingAudio NOTIFY documentPlayingAudioChanged)
   Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
+  Q_PROPERTY(qreal zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY zoomFactorChanged)
 
 public:
   explicit WebView2View(QQuickItem* parent = nullptr);
@@ -44,17 +45,23 @@ public:
   QUrl faviconUrl() const;
   bool documentPlayingAudio() const;
   bool muted() const;
+  qreal zoomFactor() const;
 
   Microsoft::WRL::ComPtr<ICoreWebView2> coreWebView() const;
 
   Q_INVOKABLE void navigate(const QUrl& url);
   Q_INVOKABLE void reload();
+  Q_INVOKABLE void stop();
   Q_INVOKABLE void goBack();
   Q_INVOKABLE void goForward();
   Q_INVOKABLE void openDevTools();
   Q_INVOKABLE void showPrintUI();
   Q_INVOKABLE void printToPdf(const QString& filePath);
   Q_INVOKABLE void setMuted(bool muted);
+  Q_INVOKABLE void setZoomFactor(qreal zoomFactor);
+  Q_INVOKABLE void zoomIn();
+  Q_INVOKABLE void zoomOut();
+  Q_INVOKABLE void zoomReset();
   Q_INVOKABLE void retryInitialize();
 
   Q_INVOKABLE void addScriptOnDocumentCreated(const QString& script);
@@ -73,6 +80,7 @@ signals:
   void faviconUrlChanged();
   void documentPlayingAudioChanged();
   void mutedChanged();
+  void zoomFactorChanged();
   void navigationCommitted(bool success);
 
   void webMessageReceived(const QString& json);
@@ -102,6 +110,7 @@ private:
   void setFaviconUrl(const QUrl& url);
   void setDocumentPlayingAudio(bool playing);
   void setMutedValue(bool muted);
+  void setZoomFactorValue(qreal zoomFactor);
   void setInitError(HRESULT code, const QString& message);
 
   Microsoft::WRL::ComPtr<ICoreWebView2Environment> m_environment;
@@ -121,6 +130,7 @@ private:
   EventRegistrationToken m_contextMenuRequestedToken{};
   EventRegistrationToken m_permissionRequestedToken{};
   EventRegistrationToken m_gotFocusToken{};
+  EventRegistrationToken m_zoomFactorChangedToken{};
 
   bool m_initializing = false;
   bool m_initialized = false;
@@ -134,6 +144,7 @@ private:
   QUrl m_faviconUrl;
   bool m_documentPlayingAudio = false;
   bool m_muted = false;
+  qreal m_zoomFactor = 1.0;
   QUrl m_pendingNavigate;
   QStringList m_pendingScripts;
 

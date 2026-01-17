@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QHash>
 #include <QTimer>
 #include <QUrl>
 
@@ -10,6 +11,8 @@ class AppSettings : public QObject
 
   Q_PROPERTY(int sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY sidebarWidthChanged)
   Q_PROPERTY(bool sidebarExpanded READ sidebarExpanded WRITE setSidebarExpanded NOTIFY sidebarExpandedChanged)
+  Q_PROPERTY(bool sidebarOnRight READ sidebarOnRight WRITE setSidebarOnRight NOTIFY sidebarOnRightChanged)
+  Q_PROPERTY(bool useSingleToolbar READ useSingleToolbar WRITE setUseSingleToolbar NOTIFY useSingleToolbarChanged)
   Q_PROPERTY(bool addressBarVisible READ addressBarVisible WRITE setAddressBarVisible NOTIFY addressBarVisibleChanged)
   Q_PROPERTY(
     bool essentialCloseResets READ essentialCloseResets WRITE setEssentialCloseResets NOTIFY essentialCloseResetsChanged)
@@ -23,6 +26,9 @@ class AppSettings : public QObject
   Q_PROPERTY(
     bool closeTabOnBackNoHistory READ closeTabOnBackNoHistory WRITE setCloseTabOnBackNoHistory NOTIFY
       closeTabOnBackNoHistoryChanged)
+  Q_PROPERTY(qreal defaultZoom READ defaultZoom WRITE setDefaultZoom NOTIFY defaultZoomChanged)
+  Q_PROPERTY(
+    bool rememberZoomPerSite READ rememberZoomPerSite WRITE setRememberZoomPerSite NOTIFY rememberZoomPerSiteChanged)
   Q_PROPERTY(int webPanelWidth READ webPanelWidth WRITE setWebPanelWidth NOTIFY webPanelWidthChanged)
   Q_PROPERTY(bool webPanelVisible READ webPanelVisible WRITE setWebPanelVisible NOTIFY webPanelVisibleChanged)
   Q_PROPERTY(QUrl webPanelUrl READ webPanelUrl WRITE setWebPanelUrl NOTIFY webPanelUrlChanged)
@@ -36,6 +42,12 @@ public:
 
   bool sidebarExpanded() const;
   void setSidebarExpanded(bool expanded);
+
+  bool sidebarOnRight() const;
+  void setSidebarOnRight(bool onRight);
+
+  bool useSingleToolbar() const;
+  void setUseSingleToolbar(bool enabled);
 
   bool addressBarVisible() const;
   void setAddressBarVisible(bool visible);
@@ -64,6 +76,15 @@ public:
   bool closeTabOnBackNoHistory() const;
   void setCloseTabOnBackNoHistory(bool enabled);
 
+  qreal defaultZoom() const;
+  void setDefaultZoom(qreal zoom);
+
+  bool rememberZoomPerSite() const;
+  void setRememberZoomPerSite(bool enabled);
+
+  Q_INVOKABLE qreal zoomForUrl(const QUrl& url) const;
+  Q_INVOKABLE void setZoomForUrl(const QUrl& url, qreal zoom);
+
   int webPanelWidth() const;
   void setWebPanelWidth(int width);
 
@@ -79,6 +100,8 @@ public:
 signals:
   void sidebarWidthChanged();
   void sidebarExpandedChanged();
+  void sidebarOnRightChanged();
+  void useSingleToolbarChanged();
   void addressBarVisibleChanged();
   void essentialCloseResetsChanged();
   void compactModeChanged();
@@ -88,6 +111,8 @@ signals:
   void onboardingSeenChanged();
   void showMenuBarChanged();
   void closeTabOnBackNoHistoryChanged();
+  void defaultZoomChanged();
+  void rememberZoomPerSiteChanged();
   void webPanelWidthChanged();
   void webPanelVisibleChanged();
   void webPanelUrlChanged();
@@ -100,6 +125,8 @@ private:
 
   int m_sidebarWidth = 260;
   bool m_sidebarExpanded = true;
+  bool m_sidebarOnRight = false;
+  bool m_useSingleToolbar = false;
   bool m_addressBarVisible = true;
   bool m_essentialCloseResets = false;
   bool m_compactMode = false;
@@ -109,6 +136,9 @@ private:
   bool m_onboardingSeen = false;
   bool m_showMenuBar = false;
   bool m_closeTabOnBackNoHistory = true;
+  qreal m_defaultZoom = 1.0;
+  bool m_rememberZoomPerSite = false;
+  QHash<QString, qreal> m_zoomByHost;
   int m_webPanelWidth = 360;
   bool m_webPanelVisible = false;
   QUrl m_webPanelUrl = QUrl(QStringLiteral("about:blank"));

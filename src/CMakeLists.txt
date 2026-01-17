@@ -12,8 +12,10 @@ qt_add_executable(xbrowser
   core/ExtensionsStore.cpp
   core/HistoryFilterModel.cpp
   core/HistoryStore.cpp
+  core/LayoutController.cpp
   core/ModsModel.cpp
   core/NotificationCenter.cpp
+  core/OmniboxUtils.cpp
   core/QuickLinksModel.cpp
   core/SessionStore.cpp
   core/SitePermissionsStore.cpp

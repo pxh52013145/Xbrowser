@@ -18,6 +18,8 @@ Item {
     signal closeRequested()
     signal openRequested(url url, string title)
 
+    Keys.onEscapePressed: root.closeRequested()
+
     function addDraft() {
         if (!root.panels) {
             return
@@ -137,6 +139,30 @@ Item {
                         color: Qt.rgba(0, 0, 0, 0.03)
                         border.color: Qt.rgba(0, 0, 0, 0.08)
                         border.width: 1
+                        property bool renaming: false
+                        property string renameDraft: ""
+
+                        function beginRename() {
+                            renaming = true
+                            renameDraft = String(title || "")
+                            Qt.callLater(() => {
+                                renameField.forceActiveFocus()
+                                renameField.selectAll()
+                            })
+                        }
+
+                        function cancelRename() {
+                            renaming = false
+                        }
+
+                        function commitRename() {
+                            if (!root.panels) {
+                                renaming = false
+                                return
+                            }
+                            root.panels.updatePanel(panelId, url, String(renameDraft || ""))
+                            renaming = false
+                        }
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -156,6 +182,17 @@ Item {
                                         text: title && title.length > 0 ? title : (url ? url.toString() : "Panel")
                                         elide: Text.ElideRight
                                         font.bold: true
+                                        visible: !renaming
+                                    }
+
+                                    TextField {
+                                        id: renameField
+                                        Layout.fillWidth: true
+                                        visible: renaming
+                                        text: renameDraft
+                                        selectByMouse: true
+                                        onTextEdited: renameDraft = text
+                                        onAccepted: commitRename()
                                     }
 
                                     Label {
@@ -168,6 +205,18 @@ Item {
                                     }
                                 }
 
+                                ToolButton {
+                                    text: "↑"
+                                    enabled: index > 0
+                                    onClicked: root.panels.movePanel(index, index - 1)
+                                }
+
+                                ToolButton {
+                                    text: "↓"
+                                    enabled: root.panels && index >= 0 && index < root.panels.count - 1
+                                    onClicked: root.panels.movePanel(index, index + 1)
+                                }
+
                                 Button {
                                     text: "Open"
                                     enabled: url && url.toString().length > 0
@@ -175,8 +224,25 @@ Item {
                                 }
 
                                 ToolButton {
-                                    text: "Remove"
-                                    onClicked: root.panels.removeAt(index)
+                                    text: renaming ? "Save" : "Rename"
+                                    onClicked: {
+                                        if (renaming) {
+                                            commitRename()
+                                        } else {
+                                            beginRename()
+                                        }
+                                    }
+                                }
+
+                                ToolButton {
+                                    text: renaming ? "Cancel" : "Remove"
+                                    onClicked: {
+                                        if (renaming) {
+                                            cancelRename()
+                                        } else {
+                                            root.panels.removeAt(index)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -195,6 +261,14 @@ Item {
                         }
                     }
                 }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: root.panels ? root.panels.lastError : ""
+                color: "#b00020"
+                wrapMode: Text.Wrap
+                visible: root.panels && root.panels.lastError && root.panels.lastError.length > 0
             }
         }
     }

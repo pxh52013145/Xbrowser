@@ -315,7 +315,7 @@ void ShortcutStore::reload()
 QVector<ShortcutStore::Entry> ShortcutStore::buildDefaults() const
 {
   QVector<Entry> entries;
-  entries.reserve(32);
+  entries.reserve(48);
 
   auto add = [&entries](QString id, QString group, QString title, QString command, QString sequence, QVariantMap args = {}) {
     Entry entry;
@@ -345,11 +345,18 @@ QVector<ShortcutStore::Entry> ShortcutStore::buildDefaults() const
   add(QStringLiteral("toggle-split-view"), QStringLiteral("View"), QStringLiteral("Toggle Split View"), QStringLiteral("toggle-split-view"), QStringLiteral("Ctrl+E"));
   add(QStringLiteral("open-find"), QStringLiteral("Tools"), QStringLiteral("Find in Page"), QStringLiteral("open-find"), QStringLiteral("Ctrl+F"));
   add(QStringLiteral("open-print"), QStringLiteral("Tools"), QStringLiteral("Print"), QStringLiteral("open-print"), QStringLiteral("Ctrl+P"));
+  add(QStringLiteral("open-file"), QStringLiteral("File"), QStringLiteral("Open File"), QStringLiteral("open-file"), QStringLiteral("Ctrl+O"));
 
   add(QStringLiteral("nav-reload"), QStringLiteral("Navigation"), QStringLiteral("Reload"), QStringLiteral("nav-reload"), QStringLiteral("Ctrl+R"));
   add(QStringLiteral("nav-reload-f5"), QStringLiteral("Navigation"), QStringLiteral("Reload (F5)"), QStringLiteral("nav-reload"), QStringLiteral("F5"));
   add(QStringLiteral("nav-back"), QStringLiteral("Navigation"), QStringLiteral("Back"), QStringLiteral("nav-back"), QStringLiteral("Alt+Left"));
   add(QStringLiteral("nav-forward"), QStringLiteral("Navigation"), QStringLiteral("Forward"), QStringLiteral("nav-forward"), QStringLiteral("Alt+Right"));
+
+  add(QStringLiteral("zoom-in"), QStringLiteral("View"), QStringLiteral("Zoom In"), QStringLiteral("zoom-in"), QStringLiteral("Ctrl++"));
+  add(QStringLiteral("zoom-in-equal"), QStringLiteral("View"), QStringLiteral("Zoom In"), QStringLiteral("zoom-in"), QStringLiteral("Ctrl+="));
+  add(QStringLiteral("zoom-out"), QStringLiteral("View"), QStringLiteral("Zoom Out"), QStringLiteral("zoom-out"), QStringLiteral("Ctrl+-"));
+  add(QStringLiteral("zoom-reset"), QStringLiteral("View"), QStringLiteral("Reset Zoom"), QStringLiteral("zoom-reset"), QStringLiteral("Ctrl+0"));
+  add(QStringLiteral("toggle-fullscreen"), QStringLiteral("View"), QStringLiteral("Toggle Fullscreen"), QStringLiteral("toggle-fullscreen"), QStringLiteral("F11"));
 
   add(QStringLiteral("next-tab"), QStringLiteral("Tabs"), QStringLiteral("Next Tab"), QStringLiteral("next-tab"), QStringLiteral("Ctrl+Tab"));
   add(QStringLiteral("prev-tab"), QStringLiteral("Tabs"), QStringLiteral("Previous Tab"), QStringLiteral("prev-tab"), QStringLiteral("Ctrl+Shift+Tab"));
