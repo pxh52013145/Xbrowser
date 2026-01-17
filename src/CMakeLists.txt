@@ -25,6 +25,7 @@ qt_add_executable(xbrowser
   core/TabModel.cpp
   core/TabSwitcherModel.cpp
   core/ShortcutStore.cpp
+  core/SourceViewerHelper.cpp
   core/ThemeController.cpp
   core/ThemePackModel.cpp
   core/ToastController.cpp

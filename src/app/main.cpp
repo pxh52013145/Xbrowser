@@ -45,6 +45,7 @@
 #include "../core/ThemeController.h"
 #include "../core/ThemePackModel.h"
 #include "../core/ToastController.h"
+#include "../core/SourceViewerHelper.h"
 #include "../engine/webview2/BrowserExtensionsModel.h"
 #include "../engine/webview2/WebView2CookieModel.h"
 #include "../engine/webview2/WebView2View.h"
@@ -349,6 +350,7 @@ int main(int argc, char* argv[])
   DownloadModel downloads;
   BookmarksStore bookmarks;
   HistoryStore history;
+  SourceViewerHelper sourceViewer;
   WebPanelsStore webPanels;
   ModsModel mods;
   ThemeController theme;
@@ -665,6 +667,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("downloads", &downloads);
   engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
   engine.rootContext()->setContextProperty("history", &history);
+  engine.rootContext()->setContextProperty("sourceViewer", &sourceViewer);
   engine.rootContext()->setContextProperty("webPanels", &webPanels);
   engine.rootContext()->setContextProperty("layoutController", &layoutController);
   engine.rootContext()->setContextProperty("omniboxUtils", &omniboxUtils);

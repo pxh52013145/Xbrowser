@@ -20,6 +20,9 @@ ApplicationWindow {
     property int preFullscreenVisibility: Window.Windowed
     property int contentFullscreenTabId: 0
     property bool contentFullscreenToggled: false
+    property string viewSourceToken: ""
+    property int viewSourceTabId: 0
+    property var viewSourceTargetView: null
 
     Timer {
         id: compactTopEnterTimer
@@ -255,6 +258,7 @@ ApplicationWindow {
             MenuItem { text: "History"; onTriggered: commands.invoke("open-history") }
             MenuItem { text: "Permissions"; onTriggered: commands.invoke("open-permissions") }
             MenuItem { text: "Diagnostics"; onTriggered: commands.invoke("open-diagnostics") }
+            MenuItem { text: "View Source"; onTriggered: commands.invoke("view-source") }
             MenuItem { text: "DevTools"; onTriggered: commands.invoke("open-devtools") }
         }
 
@@ -303,6 +307,109 @@ ApplicationWindow {
             } else {
                 root.contentFullscreenToggled = false
             }
+        }
+    }
+
+    function openViewSourceForTab(tabId) {
+        const resolvedTabId = Number(tabId || root.focusedTabId || 0)
+        const view = tabViews.byId[resolvedTabId] || root.focusedView
+
+        if (!view || !view.executeScript) {
+            toast.showToast("No active tab")
+            return
+        }
+        if (!view.initialized) {
+            toast.showToast("Tab is not ready")
+            return
+        }
+        if (root.viewSourceToken && root.viewSourceToken.length > 0) {
+            toast.showToast("Already fetching source")
+            return
+        }
+
+        const token = "vs-" + Date.now() + "-" + Math.floor(Math.random() * 1000000000)
+        root.viewSourceToken = token
+        root.viewSourceTabId = resolvedTabId
+        root.viewSourceTargetView = view
+
+        const js = `(function(){
+  const token = ${JSON.stringify(token)};
+  try {
+    const doctype = (document.doctype && window.XMLSerializer) ? (new XMLSerializer()).serializeToString(document.doctype) : "";
+    const html = document.documentElement ? document.documentElement.outerHTML : "";
+    const source = (doctype && doctype.length > 0 ? (doctype + "\\n") : "") + html;
+    return { __xb_viewSourceToken: token, url: String(location.href || ""), source: source };
+  } catch (e) {
+    return { __xb_viewSourceToken: token, error: String(e) };
+  }
+})();`
+
+        view.executeScript(js)
+        toast.showToast("Fetching page source...")
+    }
+
+    function handleViewSourceScriptExecuted(resultJson) {
+        const token = String(root.viewSourceToken || "")
+        if (token.length === 0) {
+            return
+        }
+
+        let payload = null
+        try {
+            payload = JSON.parse(resultJson)
+        } catch (e) {
+            return
+        }
+
+        if (!payload || payload.__xb_viewSourceToken !== token) {
+            return
+        }
+
+        root.viewSourceToken = ""
+        root.viewSourceTabId = 0
+        root.viewSourceTargetView = null
+
+        if (payload.error) {
+            toast.showToast("View source failed")
+            return
+        }
+
+        const sourceText = payload.source ? String(payload.source) : ""
+        if (sourceText.trim().length === 0) {
+            toast.showToast("No page source")
+            return
+        }
+
+        if (!sourceViewer || !sourceViewer.createViewSourcePage) {
+            toast.showToast("Source viewer unavailable")
+            return
+        }
+
+        const pageUrl = payload.url ? payload.url : ""
+        const fileUrl = sourceViewer.createViewSourcePage(pageUrl, sourceText)
+        if (!fileUrl || fileUrl.toString().length === 0) {
+            toast.showToast("Failed to create source viewer")
+            return
+        }
+
+        const idx = browser.newTab(fileUrl)
+        if (idx < 0) {
+            toast.showToast("Failed to open tab")
+            return
+        }
+
+        const tabId = browser.tabs.tabIdAt(idx)
+        if (tabId > 0) {
+            const label = String(pageUrl || "")
+            const title = label.length > 0 ? ("View Source - " + label) : "View Source"
+            browser.setTabCustomTitleById(tabId, title)
+        }
+    }
+
+    Connections {
+        target: root.viewSourceTargetView
+        function onScriptExecuted(resultJson) {
+            root.handleViewSourceScriptExecuted(resultJson)
         }
     }
 
@@ -873,6 +980,9 @@ ApplicationWindow {
             items.push({ action: "copy-source", text: "Copy media address", enabled: true })
         }
 
+        items.push({ separator: true })
+        items.push({ action: "view-source", text: "View page source", enabled: true })
+
         webContextMenuItems = items
 
         const x = Number(info.x || 0)
@@ -902,6 +1012,8 @@ ApplicationWindow {
             commands.invoke("new-tab", { url: src })
         } else if (action === "copy-source" && src.length > 0) {
             commands.invoke("copy-text", { text: src })
+        } else if (action === "view-source") {
+            commands.invoke("view-source", { tabId: webContextMenuTabId })
         }
     }
 
@@ -5694,6 +5806,11 @@ ApplicationWindow {
             }
             if (id === "toggle-fullscreen") {
                 root.toggleFullscreen()
+                return
+            }
+            if (id === "view-source") {
+                const tabId = args && args.tabId !== undefined ? Number(args.tabId) : root.focusedTabId
+                root.openViewSourceForTab(tabId)
                 return
             }
             if (id === "open-devtools") {
