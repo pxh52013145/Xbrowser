@@ -39,8 +39,8 @@ Win32/
 .vscode/
 .idea/
 
-# Third-party references (downloaded snapshots)
-/reference/zen-browser-src/
+# Local reference workspace (plans/logs/snapshots/generated). Do not commit to GitHub.
+/reference/
 
 # Logs
 /aqtinstall.log

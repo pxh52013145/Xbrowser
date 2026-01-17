@@ -6,7 +6,7 @@ This file closes the “build/packaging” reference items in `reference/logs/ze
 
 Zen is integrated at **build time** (not a runtime-only injection):
 
-- `reference/zen-browser-src/desktop-dev/src/zen/moz.build`
+- `reference/aboutZen/desktop-dev/src/zen/moz.build`
   - Adds `EXTRA_PP_COMPONENTS += ["ZenComponents.manifest"]`
   - Adds `DIRS += [...]` to include Zen submodules (e.g. `common`, `glance`, `mods`, `sessionstore`, etc.)
 
@@ -18,9 +18,9 @@ XBrowser equivalent:
 
 Zen maps resources to stable `chrome://browser/...` URLs via jar manifests:
 
-- `reference/zen-browser-src/desktop-dev/src/browser/base/content/zen-assets.jar.inc.mn`
+- `reference/aboutZen/desktop-dev/src/browser/base/content/zen-assets.jar.inc.mn`
   - Includes many Zen module `jar.inc.mn` files (e.g. `zen/common/jar.inc.mn`, `zen/tabs/jar.inc.mn`, `zen/workspaces/jar.inc.mn`, etc.)
-- `reference/zen-browser-src/desktop-dev/src/browser/base/content/zen-assets.inc.xhtml`
+- `reference/aboutZen/desktop-dev/src/browser/base/content/zen-assets.inc.xhtml`
   - Loads global Zen styles/scripts via `chrome://browser/content/zen-*` URLs (theme/sidebar/tabs/omnibox/workspaces/split-view, etc.)
 
 XBrowser equivalent:
