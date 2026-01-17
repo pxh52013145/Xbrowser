@@ -36,6 +36,7 @@ public:
   Q_INVOKABLE int addWorkspace(const QString& name);
   Q_INVOKABLE int addWorkspaceWithId(int workspaceId, const QString& name, const QColor& accentColor = {});
   Q_INVOKABLE bool moveWorkspace(int fromIndex, int toIndex);
+  Q_INVOKABLE int duplicateWorkspace(int index);
   Q_INVOKABLE void closeWorkspace(int index);
   Q_INVOKABLE void clear();
 

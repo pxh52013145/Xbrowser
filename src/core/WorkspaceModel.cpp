@@ -178,6 +178,65 @@ bool WorkspaceModel::moveWorkspace(int fromIndex, int toIndex)
   return true;
 }
 
+int WorkspaceModel::duplicateWorkspace(int index)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return -1;
+  }
+
+  const QString sourceName = nameAt(index);
+  const int newIndex = addWorkspace(QStringLiteral("Copy of %1").arg(sourceName));
+
+  setAccentColorAt(newIndex, accentColorAt(index));
+  setSidebarWidthAt(newIndex, sidebarWidthAt(index));
+  setSidebarExpandedAt(newIndex, sidebarExpandedAt(index));
+
+  TabGroupModel* srcGroups = groupsForIndex(index);
+  TabGroupModel* dstGroups = groupsForIndex(newIndex);
+  if (srcGroups && dstGroups) {
+    dstGroups->clear();
+    for (int g = 0; g < srcGroups->count(); ++g) {
+      dstGroups->addGroupWithId(
+        srcGroups->groupIdAt(g), srcGroups->nameAt(g), srcGroups->collapsedAt(g), srcGroups->colorAt(g));
+    }
+  }
+
+  TabModel* srcTabs = tabsForIndex(index);
+  TabModel* dstTabs = tabsForIndex(newIndex);
+  if (srcTabs && dstTabs) {
+    dstTabs->clear();
+
+    const int sourceActiveIndex = srcTabs->activeIndex();
+
+    for (int t = 0; t < srcTabs->count(); ++t) {
+      const QUrl url = srcTabs->urlAt(t);
+      const QUrl initialUrl = srcTabs->initialUrlAt(t);
+      const QString pageTitle = srcTabs->pageTitleAt(t);
+      const QString customTitle = srcTabs->customTitleAt(t);
+      const bool essential = srcTabs->isEssentialAt(t);
+      const int groupId = srcTabs->groupIdAt(t);
+      const QUrl faviconUrl = srcTabs->faviconUrlAt(t);
+
+      const QUrl resolvedUrl = url.isValid() ? url : QUrl("about:blank");
+      const int idx = dstTabs->addTabWithId(0, resolvedUrl, pageTitle, false);
+      dstTabs->setInitialUrlAt(idx, initialUrl.isValid() ? initialUrl : resolvedUrl);
+      dstTabs->setCustomTitleAt(idx, customTitle);
+      dstTabs->setEssentialAt(idx, essential);
+      const int resolvedGroupId = (dstGroups && groupId > 0 && dstGroups->indexOfGroupId(groupId) >= 0) ? groupId : 0;
+      dstTabs->setGroupIdAt(idx, resolvedGroupId);
+      dstTabs->setFaviconUrlAt(idx, faviconUrl);
+    }
+
+    if (sourceActiveIndex >= 0 && sourceActiveIndex < dstTabs->count()) {
+      dstTabs->setActiveIndex(sourceActiveIndex);
+    } else if (dstTabs->count() > 0) {
+      dstTabs->setActiveIndex(0);
+    }
+  }
+
+  return newIndex;
+}
+
 void WorkspaceModel::closeWorkspace(int index)
 {
   if (m_workspaces.size() <= 1) {
@@ -185,6 +244,32 @@ void WorkspaceModel::closeWorkspace(int index)
   }
   if (index < 0 || index >= m_workspaces.size()) {
     return;
+  }
+
+  const int targetIndex = (index == 0) ? 1 : 0;
+  if (targetIndex >= 0 && targetIndex < m_workspaces.size()) {
+    TabModel* fromTabs = m_workspaces[index].tabs;
+    TabModel* toTabs = m_workspaces[targetIndex].tabs;
+
+    if (fromTabs && toTabs) {
+      const int fromCount = fromTabs->count();
+      for (int t = 0; t < fromCount; ++t) {
+        const QUrl url = fromTabs->urlAt(t);
+        const QUrl initialUrl = fromTabs->initialUrlAt(t);
+        const QString pageTitle = fromTabs->pageTitleAt(t);
+        const QString customTitle = fromTabs->customTitleAt(t);
+        const bool essential = fromTabs->isEssentialAt(t);
+        const QUrl faviconUrl = fromTabs->faviconUrlAt(t);
+
+        const QUrl resolvedUrl = url.isValid() ? url : QUrl("about:blank");
+        const int toIndex = toTabs->addTabWithId(0, resolvedUrl, pageTitle, false);
+        toTabs->setInitialUrlAt(toIndex, initialUrl.isValid() ? initialUrl : resolvedUrl);
+        toTabs->setCustomTitleAt(toIndex, customTitle);
+        toTabs->setEssentialAt(toIndex, essential);
+        toTabs->setGroupIdAt(toIndex, 0);
+        toTabs->setFaviconUrlAt(toIndex, faviconUrl);
+      }
+    }
   }
 
   beginRemoveRows(QModelIndex(), index, index);

@@ -223,6 +223,22 @@ Item {
                 }
 
                 Button {
+                    text: "Duplicate Workspace"
+                    enabled: root.workspaces.activeIndex >= 0
+                    onClicked: {
+                        root.popupHost.close()
+                        const src = root.workspaces.activeIndex
+                        if (src < 0) {
+                            return
+                        }
+                        const created = root.workspaces.duplicateWorkspace(src)
+                        if (created >= 0) {
+                            root.workspaces.activeIndex = created
+                        }
+                    }
+                }
+
+                Button {
                     text: "Delete Workspace"
                     enabled: root.workspaces.count() > 1 && root.workspaces.activeIndex >= 0
                     onClicked: {
