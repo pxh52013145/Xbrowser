@@ -6077,6 +6077,7 @@ ApplicationWindow {
             HistoryPanel {
                 anchors.fill: parent
                 history: root.historyModel
+                popupManager: popupManager
                 embedded: true
                 onCloseRequested: popupManager.close()
             }
@@ -6157,6 +6158,7 @@ ApplicationWindow {
 
         HistoryPanel {
             history: root.historyModel
+            popupManager: popupManager
             embedded: true
             onCloseRequested: root.sidebarPanel = "tabs"
         }
@@ -6198,6 +6200,7 @@ ApplicationWindow {
 
         HistoryPanel {
             history: root.historyModel
+            popupManager: popupManager
             onCloseRequested: overlayHost.hide()
         }
     }

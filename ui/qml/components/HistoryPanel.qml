@@ -9,16 +9,67 @@ Item {
     anchors.fill: parent
 
     required property var history
+    required property var popupManager
 
     signal closeRequested()
 
     property bool embedded: false
     property string searchText: ""
 
+    property var selectedById: ({})
+    property int selectedCount: 0
+    property int selectionRevision: 0
+
+    property int contextMenuTargetId: 0
+    property url contextMenuTargetUrl: ""
+    property string contextMenuTargetTitle: ""
+    property var contextMenuItems: []
+    property real contextMenuX: 0
+    property real contextMenuY: 0
+
     HistoryFilterModel {
         id: filtered
         sourceHistory: root.history
         searchText: root.searchText
+    }
+
+    function isSelected(historyId) {
+        root.selectionRevision
+        return !!root.selectedById[String(historyId)]
+    }
+
+    function setSelected(historyId, selected) {
+        const key = String(historyId || 0)
+        if (!key || key === "0") {
+            return
+        }
+        const had = !!root.selectedById[key]
+        if (selected && !had) {
+            root.selectedById[key] = true
+            root.selectedCount += 1
+            root.selectionRevision += 1
+        } else if (!selected && had) {
+            delete root.selectedById[key]
+            root.selectedCount = Math.max(0, root.selectedCount - 1)
+            root.selectionRevision += 1
+        }
+    }
+
+    function clearSelection() {
+        root.selectedById = ({})
+        root.selectedCount = 0
+        root.selectionRevision += 1
+    }
+
+    function deleteSelected() {
+        if (!root.history || !root.history.removeById) {
+            return
+        }
+        const keys = Object.keys(root.selectedById || {})
+        for (const k of keys) {
+            root.history.removeById(Number(k))
+        }
+        root.clearSelection()
     }
 
     function clearToday() {
@@ -29,6 +80,61 @@ Item {
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
         const end = start + 24 * 60 * 60 * 1000
         root.history.clearRange(start, end)
+    }
+
+    function openContextMenuAtPoint(historyId, url, title, x, y) {
+        root.contextMenuTargetId = Number(historyId || 0)
+        root.contextMenuTargetUrl = url || ""
+        root.contextMenuTargetTitle = String(title || "")
+        root.contextMenuX = Number(x || 0)
+        root.contextMenuY = Number(y || 0)
+
+        const urlText = root.contextMenuTargetUrl ? String(root.contextMenuTargetUrl) : ""
+        const items = []
+        items.push({ action: "open", text: "Open", enabled: urlText.length > 0 })
+        items.push({ action: "copy-url", text: "Copy URL", enabled: urlText.length > 0 })
+        items.push({ separator: true })
+        items.push({ action: "delete", text: "Delete", enabled: root.contextMenuTargetId > 0 })
+        root.contextMenuItems = items
+
+        if (root.popupManager && root.popupManager.openAtPoint) {
+            root.popupManager.openAtPoint(contextMenuComponent, x, y, root)
+        }
+    }
+
+    function handleContextMenuAction(action, args) {
+        const id = root.contextMenuTargetId
+        const urlText = root.contextMenuTargetUrl ? String(root.contextMenuTargetUrl) : ""
+
+        if (action === "open" && urlText.length > 0) {
+            commands.invoke("new-tab", { url: urlText })
+            root.closeRequested()
+            return
+        }
+
+        if (action === "copy-url" && urlText.length > 0) {
+            commands.invoke("copy-text", { text: urlText })
+            return
+        }
+
+        if (action === "delete" && id > 0 && root.history && root.history.removeById) {
+            root.history.removeById(id)
+            root.setSelected(id, false)
+        }
+    }
+
+    Component {
+        id: contextMenuComponent
+
+        ContextMenu {
+            items: root.contextMenuItems
+            onActionTriggered: (action, args) => {
+                if (root.popupManager) {
+                    root.popupManager.close()
+                }
+                root.handleContextMenuAction(action, args)
+            }
+        }
     }
 
     Rectangle {
@@ -70,6 +176,20 @@ Item {
                     text: "Clear all"
                     enabled: root.history && root.history.count > 0
                     onClicked: root.history.clearAll()
+                }
+
+                Button {
+                    text: "Delete selected"
+                    visible: root.selectedCount > 0
+                    enabled: root.selectedCount > 0
+                    onClicked: root.deleteSelected()
+                }
+
+                Button {
+                    text: "Clear selection"
+                    visible: root.selectedCount > 0
+                    enabled: root.selectedCount > 0
+                    onClicked: root.clearSelection()
                 }
 
                 ToolButton {
@@ -133,6 +253,11 @@ Item {
                         contentItem: RowLayout {
                             spacing: theme.spacing
 
+                            CheckBox {
+                                checked: root.isSelected(historyId)
+                                onToggled: root.setSelected(historyId, checked)
+                            }
+
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: Math.max(2, Math.round(theme.spacing / 4))
@@ -169,11 +294,25 @@ Item {
                             }
 
                             ToolButton {
-                                text: "×"
+                                text: "⋯"
                                 onClicked: {
-                                    if (root.history && root.history.removeById) {
-                                        root.history.removeById(historyId)
+                                    if (!root.popupManager) {
+                                        return
                                     }
+                                    const pos = mapToItem(root.popupManager, width, height)
+                                    root.openContextMenuAtPoint(historyId, url, title, pos.x, pos.y)
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.RightButton
+                                onClicked: (mouse) => {
+                                    if (!root.popupManager) {
+                                        return
+                                    }
+                                    const pos = mapToItem(root.popupManager, mouse.x, mouse.y)
+                                    root.openContextMenuAtPoint(historyId, url, title, pos.x, pos.y)
                                 }
                             }
                         }
