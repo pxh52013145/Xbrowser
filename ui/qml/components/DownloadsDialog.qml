@@ -257,7 +257,13 @@ Item {
                                             Button {
                                                 text: "Folder"
                                                 enabled: filePath && filePath.length > 0
-                                                onClicked: root.downloads.openFolder(downloadId)
+                                                onClicked: {
+                                                    const ok = nativeUtils.openFolder(filePath)
+                                                    if (!ok) {
+                                                        const err = nativeUtils.lastError || ""
+                                                        toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -314,7 +320,13 @@ Item {
                                             Button {
                                                 text: "Open"
                                                 enabled: filePath && filePath.length > 0
-                                                onClicked: root.downloads.openFile(downloadId)
+                                                onClicked: {
+                                                    const ok = nativeUtils.openPath(filePath)
+                                                    if (!ok) {
+                                                        const err = nativeUtils.lastError || ""
+                                                        toast.showToast(err.length > 0 ? ("Open failed: " + err) : "Open failed")
+                                                    }
+                                                }
                                             }
 
                                             Button {
@@ -326,7 +338,13 @@ Item {
                                             Button {
                                                 text: "Folder"
                                                 enabled: filePath && filePath.length > 0
-                                                onClicked: root.downloads.openFolder(downloadId)
+                                                onClicked: {
+                                                    const ok = nativeUtils.openFolder(filePath)
+                                                    if (!ok) {
+                                                        const err = nativeUtils.lastError || ""
+                                                        toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -389,7 +407,13 @@ Item {
                                             Button {
                                                 text: "Folder"
                                                 enabled: filePath && filePath.length > 0
-                                                onClicked: root.downloads.openFolder(downloadId)
+                                                onClicked: {
+                                                    const ok = nativeUtils.openFolder(filePath)
+                                                    if (!ok) {
+                                                        const err = nativeUtils.lastError || ""
+                                                        toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                                                    }
+                                                }
                                             }
                                         }
                                     }

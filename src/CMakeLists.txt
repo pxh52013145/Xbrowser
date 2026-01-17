@@ -40,6 +40,8 @@ qt_add_executable(xbrowser
 
 if(WIN32)
   target_sources(xbrowser PRIVATE
+    platform/windows/NativeUtils.cpp
+    platform/windows/NativeUtils.h
     platform/windows/WindowChromeController.cpp
     platform/windows/WindowChromeController.h
   )

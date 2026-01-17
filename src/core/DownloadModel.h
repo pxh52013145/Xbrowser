@@ -47,6 +47,8 @@ public:
   Q_INVOKABLE void openFolder(int downloadId);
   Q_INVOKABLE void openLatestFinishedFile();
   Q_INVOKABLE void openLatestFinishedFolder();
+  Q_INVOKABLE QString latestFinishedFilePath();
+  Q_INVOKABLE QString latestFinishedFolderPath();
 
 signals:
   void activeCountChanged();

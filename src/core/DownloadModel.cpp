@@ -339,6 +339,46 @@ void DownloadModel::openLatestFinishedFolder()
   }
 }
 
+QString DownloadModel::latestFinishedFilePath()
+{
+  ensureLoaded();
+
+  for (int i = m_entries.size() - 1; i >= 0; --i) {
+    const Entry& entry = m_entries[i];
+    if (entry.state != State::Completed) {
+      continue;
+    }
+    if (entry.filePath.isEmpty()) {
+      continue;
+    }
+    return entry.filePath;
+  }
+
+  return {};
+}
+
+QString DownloadModel::latestFinishedFolderPath()
+{
+  ensureLoaded();
+
+  for (int i = m_entries.size() - 1; i >= 0; --i) {
+    const Entry& entry = m_entries[i];
+    if (entry.state != State::Completed) {
+      continue;
+    }
+    if (entry.filePath.isEmpty()) {
+      continue;
+    }
+
+    const QString folder = QFileInfo(entry.filePath).absolutePath();
+    if (!folder.isEmpty()) {
+      return folder;
+    }
+  }
+
+  return {};
+}
+
 int DownloadModel::findIndexById(int downloadId) const
 {
   for (int i = 0; i < m_entries.size(); ++i) {

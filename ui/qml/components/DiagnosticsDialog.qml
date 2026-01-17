@@ -97,20 +97,38 @@ Item {
 
                 Button {
                     text: "Open log folder"
-                    enabled: root.diagnostics && root.diagnostics.openLogFolder
-                    onClicked: root.diagnostics.openLogFolder()
+                    enabled: root.diagnostics && root.diagnostics.logFilePath && root.diagnostics.logFilePath.length > 0
+                    onClicked: {
+                        const ok = nativeUtils.openFolder(root.diagnostics.logFilePath)
+                        if (!ok) {
+                            const err = nativeUtils.lastError || ""
+                            toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                        }
+                    }
                 }
 
                 Button {
                     text: "Open log file"
-                    enabled: root.diagnostics && root.diagnostics.openLogFile
-                    onClicked: root.diagnostics.openLogFile()
+                    enabled: root.diagnostics && root.diagnostics.logFilePath && root.diagnostics.logFilePath.length > 0
+                    onClicked: {
+                        const ok = nativeUtils.openPath(root.diagnostics.logFilePath)
+                        if (!ok) {
+                            const err = nativeUtils.lastError || ""
+                            toast.showToast(err.length > 0 ? ("Open failed: " + err) : "Open failed")
+                        }
+                    }
                 }
 
                 Button {
                     text: "Open data folder"
-                    enabled: root.diagnostics && root.diagnostics.openDataFolder
-                    onClicked: root.diagnostics.openDataFolder()
+                    enabled: root.diagnostics && root.diagnostics.dataDir && root.diagnostics.dataDir.length > 0
+                    onClicked: {
+                        const ok = nativeUtils.openFolder(root.diagnostics.dataDir)
+                        if (!ok) {
+                            const err = nativeUtils.lastError || ""
+                            toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                        }
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
@@ -127,4 +145,3 @@ Item {
 
     Keys.onEscapePressed: root.closeRequested()
 }
-

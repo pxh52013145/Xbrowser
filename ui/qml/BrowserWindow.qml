@@ -2285,13 +2285,25 @@ ApplicationWindow {
                                 Button {
                                     text: "Open"
                                     enabled: filePath && filePath.length > 0
-                                    onClicked: downloads.openFile(downloadId)
+                                    onClicked: {
+                                        const ok = nativeUtils.openPath(filePath)
+                                        if (!ok) {
+                                            const err = nativeUtils.lastError || ""
+                                            toast.showToast(err.length > 0 ? ("Open failed: " + err) : "Open failed")
+                                        }
+                                    }
                                 }
 
                                 Button {
                                     text: "Folder"
                                     enabled: filePath && filePath.length > 0
-                                    onClicked: downloads.openFolder(downloadId)
+                                    onClicked: {
+                                        const ok = nativeUtils.openFolder(filePath)
+                                        if (!ok) {
+                                            const err = nativeUtils.lastError || ""
+                                            toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -5968,11 +5980,29 @@ ApplicationWindow {
                 return
             }
             if (id === "open-latest-download-file") {
-                downloads.openLatestFinishedFile()
+                const path = downloads && downloads.latestFinishedFilePath ? downloads.latestFinishedFilePath() : ""
+                if (path && String(path).length > 0) {
+                    const ok = nativeUtils.openPath(path)
+                    if (!ok) {
+                        const err = nativeUtils.lastError || ""
+                        toast.showToast(err.length > 0 ? ("Open failed: " + err) : "Open failed")
+                    }
+                } else {
+                    toast.showToast("No finished downloads")
+                }
                 return
             }
             if (id === "open-latest-download-folder") {
-                downloads.openLatestFinishedFolder()
+                const folder = downloads && downloads.latestFinishedFolderPath ? downloads.latestFinishedFolderPath() : ""
+                if (folder && String(folder).length > 0) {
+                    const ok = nativeUtils.openFolder(folder)
+                    if (!ok) {
+                        const err = nativeUtils.lastError || ""
+                        toast.showToast(err.length > 0 ? ("Open folder failed: " + err) : "Open folder failed")
+                    }
+                } else {
+                    toast.showToast("No finished downloads")
+                }
                 return
             }
             if (id === "retry-last-download") {

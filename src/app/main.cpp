@@ -50,6 +50,7 @@
 #include "../engine/webview2/BrowserExtensionsModel.h"
 #include "../engine/webview2/WebView2CookieModel.h"
 #include "../engine/webview2/WebView2View.h"
+#include "../platform/windows/NativeUtils.h"
 #include "../platform/windows/WindowChromeController.h"
 
 namespace
@@ -349,6 +350,7 @@ int main(int argc, char* argv[])
   ShortcutStore shortcutStore;
   NotificationCenter notifications;
   ToastController toast;
+  NativeUtils nativeUtils;
   DownloadModel downloads;
   BookmarksStore bookmarks;
   HistoryStore history;
@@ -666,6 +668,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("shortcutStore", &shortcutStore);
   engine.rootContext()->setContextProperty("notifications", &notifications);
   engine.rootContext()->setContextProperty("toast", &toast);
+  engine.rootContext()->setContextProperty("nativeUtils", &nativeUtils);
   engine.rootContext()->setContextProperty("downloads", &downloads);
   engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
   engine.rootContext()->setContextProperty("history", &history);
