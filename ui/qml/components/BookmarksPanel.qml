@@ -310,9 +310,78 @@ Item {
                             height: visibleRole ? Math.max(1, content.implicitHeight) : 0
 
                             readonly property bool visibleRole: !!treeVisible
+                            property bool dropHover: false
+
+                            Rectangle {
+                                anchors.fill: content
+                                visible: parent.visibleRole && parent.dropHover
+                                radius: theme.cornerRadius
+                                color: Qt.rgba(0, 0, 0, 0.06)
+                                z: 0
+                            }
+
+                            DropArea {
+                                id: dropArea
+                                anchors.fill: content
+                                enabled: parent.visibleRole && !!root.bookmarks
+                                keys: ["application/x-xbrowser-bookmark-id"]
+                                onEntered: parent.dropHover = true
+                                onExited: parent.dropHover = false
+                                onDropped: (drop) => {
+                                    parent.dropHover = false
+                                    if (!root.bookmarks) {
+                                        return
+                                    }
+
+                                    const srcId = Number(drop.mimeData["application/x-xbrowser-bookmark-id"] || 0)
+                                    if (srcId <= 0 || srcId === bookmarkId) {
+                                        return
+                                    }
+
+                                    const srcParentId = Number(drop.mimeData["application/x-xbrowser-bookmark-parent-id"] || 0)
+                                    const srcOrder = Number(drop.mimeData["application/x-xbrowser-bookmark-order"] || 0)
+
+                                    const y = Number(drop.y || 0)
+                                    const h = Math.max(1, dropArea.height)
+                                    const tgtParent = Number(parentId || 0)
+                                    const tgtOrder = Number(order || 0)
+
+                                    let destParentId = tgtParent
+                                    let destIndex = -1
+
+                                    if (isFolder) {
+                                        if (y < h * 0.25) {
+                                            destParentId = tgtParent
+                                            destIndex = tgtOrder
+                                        } else if (y > h * 0.75) {
+                                            destParentId = tgtParent
+                                            destIndex = tgtOrder + 1
+                                        } else {
+                                            destParentId = Number(bookmarkId || 0)
+                                            destIndex = -1
+                                            if (!expanded) {
+                                                root.bookmarks.toggleExpanded(bookmarkId)
+                                            }
+                                        }
+                                    } else {
+                                        const before = y < h / 2
+                                        destParentId = tgtParent
+                                        destIndex = tgtOrder + (before ? 0 : 1)
+                                    }
+
+                                    if (destIndex >= 0 && destParentId === srcParentId && srcOrder < destIndex) {
+                                        destIndex -= 1
+                                    }
+
+                                    if (!root.bookmarks.moveItem(srcId, destParentId, destIndex)) {
+                                        toast.showToast("Can't move item here")
+                                    }
+                                }
+                            }
 
                             ItemDelegate {
                                 id: content
+                                z: 1
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.top: parent.top
@@ -331,6 +400,28 @@ Item {
 
                                 contentItem: RowLayout {
                                     spacing: theme.spacing
+
+                                    ToolButton {
+                                        text: "≡"
+                                        enabled: root.bookmarks && bookmarkId !== root.editingId
+                                        focusPolicy: Qt.NoFocus
+
+                                        DragHandler {
+                                            id: dragHandler
+                                            target: null
+                                        }
+
+                                        Drag.active: dragHandler.active
+                                        Drag.supportedActions: Qt.MoveAction
+                                        Drag.hotSpot.x: width / 2
+                                        Drag.hotSpot.y: height / 2
+                                        Drag.mimeData: ({
+                                            "application/x-xbrowser-bookmark-id": String(bookmarkId),
+                                            "application/x-xbrowser-bookmark-parent-id": String(parentId),
+                                            "application/x-xbrowser-bookmark-order": String(order),
+                                            "application/x-xbrowser-bookmark-is-folder": isFolder ? "1" : "0"
+                                        })
+                                    }
 
                                     ToolButton {
                                         visible: isFolder

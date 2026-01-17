@@ -140,6 +140,43 @@ private slots:
     QCOMPARE(idx.data(BookmarksStore::TitleRole).toString(), QStringLiteral("Two"));
   }
 
+  void reorder_moveItem_changesOrder()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    {
+      BookmarksStore store;
+      store.addBookmark(QUrl("https://a.example/"), "A");
+      store.addBookmark(QUrl("https://b.example/"), "B");
+      store.addBookmark(QUrl("https://c.example/"), "C");
+
+      const int bRow = store.indexOfUrl(QUrl("https://b.example/"));
+      QVERIFY(bRow >= 0);
+      const int bId = store.index(bRow, 0).data(BookmarksStore::BookmarkIdRole).toInt();
+      QVERIFY(bId > 0);
+
+      QVERIFY(store.moveItem(bId, 0, 0));
+
+      QCOMPARE(store.index(0, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("B"));
+      QCOMPARE(store.index(1, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("A"));
+      QCOMPARE(store.index(2, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("C"));
+
+      QString error;
+      QVERIFY(store.saveNow(&error));
+      QCOMPARE(error, QString());
+    }
+
+    {
+      BookmarksStore store;
+      QCOMPARE(store.rowCount(), 3);
+      QCOMPARE(store.index(0, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("B"));
+      QCOMPARE(store.index(1, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("A"));
+      QCOMPARE(store.index(2, 0).data(BookmarksStore::TitleRole).toString(), QStringLiteral("C"));
+    }
+  }
+
   void htmlExportImport_roundTrip()
   {
     QTemporaryDir dir;
