@@ -32,6 +32,47 @@ private slots:
     QCOMPARE(model.data(idx, DownloadModel::SuccessRole).toBool(), true);
   }
 
+  void updateProgress_updatesRoles()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    DownloadModel model;
+    const int downloadId = model.addStarted("https://example.com/file", "C:/tmp/file.bin");
+    QVERIFY(downloadId > 0);
+
+    model.updateProgress(downloadId, 123, 456, true, true, "Paused");
+
+    const QModelIndex idx = model.index(0, 0);
+    QCOMPARE(model.data(idx, DownloadModel::BytesReceivedRole).toLongLong(), 123);
+    QCOMPARE(model.data(idx, DownloadModel::TotalBytesRole).toLongLong(), 456);
+    QCOMPARE(model.data(idx, DownloadModel::PausedRole).toBool(), true);
+    QCOMPARE(model.data(idx, DownloadModel::CanResumeRole).toBool(), true);
+    QCOMPARE(model.data(idx, DownloadModel::InterruptReasonRole).toString(), QStringLiteral("Paused"));
+    QCOMPARE(model.activeCount(), 1);
+  }
+
+  void markFinishedById_setsInterruptReason()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    DownloadModel model;
+    const int downloadId = model.addStarted("https://example.com/file", "C:/tmp/file.bin");
+    QVERIFY(downloadId > 0);
+
+    model.updateProgress(downloadId, 10, 20, false, false, "");
+    model.markFinishedById(downloadId, false, "Canceled");
+    QCOMPARE(model.activeCount(), 0);
+
+    const QModelIndex idx = model.index(0, 0);
+    QCOMPARE(model.data(idx, DownloadModel::StateRole).toString(), QStringLiteral("failed"));
+    QCOMPARE(model.data(idx, DownloadModel::SuccessRole).toBool(), false);
+    QCOMPARE(model.data(idx, DownloadModel::InterruptReasonRole).toString(), QStringLiteral("Canceled"));
+  }
+
   void clearFinished_removesCompletedEntries()
   {
     QTemporaryDir dir;
@@ -105,6 +146,32 @@ private slots:
     const QModelIndex idx = loaded.index(0, 0);
     QCOMPARE(loaded.data(idx, DownloadModel::StateRole).toString(), QStringLiteral("completed"));
     QCOMPARE(loaded.data(idx, DownloadModel::SuccessRole).toBool(), true);
+  }
+
+  void persistsExtendedFields()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    {
+      DownloadModel model;
+      const int downloadId = model.addStarted("https://a", "a.bin");
+      QVERIFY(downloadId > 0);
+      model.updateProgress(downloadId, 1234, 5678, true, true, "Paused");
+      model.markFinishedById(downloadId, false, "Canceled");
+      QCOMPARE(model.rowCount(), 1);
+    }
+
+    DownloadModel loaded;
+    QCOMPARE(loaded.rowCount(), 1);
+
+    const QModelIndex idx = loaded.index(0, 0);
+    QCOMPARE(loaded.data(idx, DownloadModel::BytesReceivedRole).toLongLong(), 1234);
+    QCOMPARE(loaded.data(idx, DownloadModel::TotalBytesRole).toLongLong(), 5678);
+    QCOMPARE(loaded.data(idx, DownloadModel::PausedRole).toBool(), false);
+    QCOMPARE(loaded.data(idx, DownloadModel::CanResumeRole).toBool(), false);
+    QCOMPARE(loaded.data(idx, DownloadModel::InterruptReasonRole).toString(), QStringLiteral("Canceled"));
   }
 };
 

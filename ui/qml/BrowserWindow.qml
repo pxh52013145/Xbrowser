@@ -26,6 +26,7 @@ ApplicationWindow {
 
     property var activeDownloadIdByKey: ({})
     property var activeDownloadOpById: ({})
+    property string lastFailedDownloadUri: ""
 
     Timer {
         id: compactTopEnterTimer
@@ -980,9 +981,14 @@ ApplicationWindow {
         }
 
         if (success) {
-            toast.showToast("Download finished", "Open", "open-latest-download-file", 6000)
+            toast.showToast("Download finished", "Open Folder", "open-latest-download-folder", 6000)
         } else {
-            toast.showToast("Download failed", "Downloads", "open-downloads", 6000)
+            root.lastFailedDownloadUri = uri ? String(uri) : ""
+            if (root.lastFailedDownloadUri && root.lastFailedDownloadUri.trim().length > 0) {
+                toast.showToast("Download failed", "Retry", "retry-last-download", 6000)
+            } else {
+                toast.showToast("Download failed", "Downloads", "open-downloads", 6000)
+            }
         }
     }
 
@@ -5967,6 +5973,15 @@ ApplicationWindow {
             }
             if (id === "open-latest-download-folder") {
                 downloads.openLatestFinishedFolder()
+                return
+            }
+            if (id === "retry-last-download") {
+                const url = root.lastFailedDownloadUri ? String(root.lastFailedDownloadUri) : ""
+                if (url.trim().length > 0) {
+                    browser.newTab(url)
+                } else {
+                    root.toggleTopBarPopup("downloads-panel", downloadsPanelComponent, downloadsButton)
+                }
                 return
             }
             if (id === "focus-split-primary") {
