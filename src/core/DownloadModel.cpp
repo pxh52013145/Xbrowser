@@ -1,12 +1,22 @@
 #include "DownloadModel.h"
 
+#include "AppPaths.h"
+
 #include <QDesktopServices>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 #include <QUrl>
 
 DownloadModel::DownloadModel(QObject* parent)
   : QAbstractListModel(parent)
 {
+  ensureLoaded();
+  updateActiveCount();
 }
 
 int DownloadModel::rowCount(const QModelIndex& parent) const
@@ -70,6 +80,8 @@ int DownloadModel::count() const
 
 void DownloadModel::addStarted(const QString& uri, const QString& filePath)
 {
+  ensureLoaded();
+
   const QString trimmedUri = uri.trimmed();
   const QString trimmedPath = filePath.trimmed();
   if (trimmedUri.isEmpty() && trimmedPath.isEmpty()) {
@@ -89,10 +101,13 @@ void DownloadModel::addStarted(const QString& uri, const QString& filePath)
   endInsertRows();
 
   updateActiveCount();
+  saveNow();
 }
 
 void DownloadModel::markFinished(const QString& uri, const QString& filePath, bool success)
 {
+  ensureLoaded();
+
   const int row = findLatestInProgress(uri.trimmed(), filePath.trimmed());
   if (row < 0) {
     return;
@@ -105,10 +120,13 @@ void DownloadModel::markFinished(const QString& uri, const QString& filePath, bo
   const QModelIndex idx = index(row, 0);
   emit dataChanged(idx, idx, {StateRole, SuccessRole, FinishedAtRole});
   updateActiveCount();
+  saveNow();
 }
 
 void DownloadModel::clearFinished()
 {
+  ensureLoaded();
+
   bool removed = false;
   for (int i = m_entries.size() - 1; i >= 0; --i) {
     if (m_entries[i].state == State::InProgress) {
@@ -122,11 +140,14 @@ void DownloadModel::clearFinished()
 
   if (removed) {
     updateActiveCount();
+    saveNow();
   }
 }
 
 void DownloadModel::clearAll()
 {
+  ensureLoaded();
+
   if (m_entries.isEmpty() && m_nextId == 1) {
     return;
   }
@@ -137,10 +158,13 @@ void DownloadModel::clearAll()
   endResetModel();
 
   updateActiveCount();
+  saveNow();
 }
 
 void DownloadModel::clearRange(qint64 fromMs, qint64 toMs)
 {
+  ensureLoaded();
+
   if (fromMs <= 0 || toMs <= 0 || toMs <= fromMs) {
     return;
   }
@@ -168,10 +192,13 @@ void DownloadModel::clearRange(qint64 fromMs, qint64 toMs)
   endResetModel();
 
   updateActiveCount();
+  saveNow();
 }
 
 void DownloadModel::openFile(int downloadId)
 {
+  ensureLoaded();
+
   const int idx = findIndexById(downloadId);
   if (idx < 0) {
     return;
@@ -187,6 +214,8 @@ void DownloadModel::openFile(int downloadId)
 
 void DownloadModel::openFolder(int downloadId)
 {
+  ensureLoaded();
+
   const int idx = findIndexById(downloadId);
   if (idx < 0) {
     return;
@@ -207,6 +236,8 @@ void DownloadModel::openFolder(int downloadId)
 
 void DownloadModel::openLatestFinishedFile()
 {
+  ensureLoaded();
+
   for (int i = m_entries.size() - 1; i >= 0; --i) {
     const Entry& entry = m_entries[i];
     if (entry.state != State::Completed) {
@@ -222,6 +253,8 @@ void DownloadModel::openLatestFinishedFile()
 
 void DownloadModel::openLatestFinishedFolder()
 {
+  ensureLoaded();
+
   for (int i = m_entries.size() - 1; i >= 0; --i) {
     const Entry& entry = m_entries[i];
     if (entry.state != State::Completed) {
@@ -295,4 +328,150 @@ void DownloadModel::updateActiveCount()
   }
   m_activeCount = next;
   emit activeCountChanged();
+}
+
+void DownloadModel::ensureStoragePath()
+{
+  const QString nextPath = QDir(xbrowser::appDataRoot()).filePath(QStringLiteral("downloads.json"));
+  if (nextPath == m_storagePath) {
+    return;
+  }
+
+  m_storagePath = nextPath;
+  m_loaded = false;
+  m_entries.clear();
+  m_nextId = 1;
+  m_activeCount = 0;
+}
+
+void DownloadModel::ensureLoaded()
+{
+  ensureStoragePath();
+
+  if (m_loaded) {
+    return;
+  }
+  m_loaded = true;
+
+  loadNow();
+}
+
+bool DownloadModel::loadNow()
+{
+  if (m_storagePath.isEmpty()) {
+    return false;
+  }
+
+  QFile f(m_storagePath);
+  if (!f.exists() || !f.open(QIODevice::ReadOnly)) {
+    return true;
+  }
+
+  const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+  if (!doc.isObject()) {
+    return false;
+  }
+
+  const QJsonObject root = doc.object();
+  const int version = root.value(QStringLiteral("version")).toInt(1);
+  if (version != 1) {
+    return false;
+  }
+
+  const auto stateFromString = [](const QString& value) -> State {
+    const QString s = value.trimmed().toLower();
+    if (s == QStringLiteral("completed")) {
+      return State::Completed;
+    }
+    if (s == QStringLiteral("failed")) {
+      return State::Failed;
+    }
+    return State::InProgress;
+  };
+
+  const QJsonArray items = root.value(QStringLiteral("downloads")).toArray();
+  QVector<Entry> entries;
+  entries.reserve(items.size());
+
+  int maxId = 0;
+  for (const QJsonValue& value : items) {
+    if (!value.isObject()) {
+      continue;
+    }
+
+    const QJsonObject obj = value.toObject();
+    const int id = obj.value(QStringLiteral("id")).toInt();
+    if (id <= 0) {
+      continue;
+    }
+
+    const QString uri = obj.value(QStringLiteral("uri")).toString().trimmed();
+    const QString filePath = obj.value(QStringLiteral("filePath")).toString().trimmed();
+    if (uri.isEmpty() && filePath.isEmpty()) {
+      continue;
+    }
+
+    Entry entry;
+    entry.id = id;
+    entry.uri = uri;
+    entry.filePath = filePath;
+    entry.state = stateFromString(obj.value(QStringLiteral("state")).toString());
+    entry.startedAtMs = static_cast<qint64>(obj.value(QStringLiteral("startedAtMs")).toDouble());
+    entry.finishedAtMs = static_cast<qint64>(obj.value(QStringLiteral("finishedAtMs")).toDouble());
+
+    entries.push_back(entry);
+    if (id > maxId) {
+      maxId = id;
+    }
+  }
+
+  int nextId = root.value(QStringLiteral("nextId")).toInt(maxId + 1);
+  if (nextId < maxId + 1) {
+    nextId = maxId + 1;
+  }
+  if (nextId <= 0) {
+    nextId = 1;
+  }
+
+  beginResetModel();
+  m_entries = std::move(entries);
+  m_nextId = nextId;
+  endResetModel();
+
+  updateActiveCount();
+  return true;
+}
+
+bool DownloadModel::saveNow() const
+{
+  if (m_storagePath.isEmpty()) {
+    return false;
+  }
+
+  QJsonArray items;
+
+  for (const Entry& entry : m_entries) {
+    QJsonObject obj;
+    obj.insert(QStringLiteral("id"), entry.id);
+    obj.insert(QStringLiteral("uri"), entry.uri);
+    obj.insert(QStringLiteral("filePath"), entry.filePath);
+    obj.insert(QStringLiteral("state"), stateToString(entry.state));
+    obj.insert(QStringLiteral("startedAtMs"), static_cast<double>(entry.startedAtMs));
+    obj.insert(QStringLiteral("finishedAtMs"), static_cast<double>(entry.finishedAtMs));
+    items.append(obj);
+  }
+
+  QJsonObject root;
+  root.insert(QStringLiteral("version"), 1);
+  root.insert(QStringLiteral("nextId"), m_nextId);
+  root.insert(QStringLiteral("downloads"), items);
+
+  QSaveFile out(m_storagePath);
+  if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    return false;
+  }
+
+  out.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+  out.write("\n");
+  return out.commit();
 }

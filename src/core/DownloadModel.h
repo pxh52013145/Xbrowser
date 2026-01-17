@@ -2,6 +2,7 @@
 
 #include <QAbstractListModel>
 #include <QDateTime>
+#include <QString>
 
 class DownloadModel : public QAbstractListModel
 {
@@ -65,8 +66,14 @@ private:
   int findLatestInProgress(const QString& uri, const QString& filePath) const;
   static QString stateToString(State state);
   void updateActiveCount();
+  void ensureLoaded();
+  void ensureStoragePath();
+  bool loadNow();
+  bool saveNow() const;
 
   QVector<Entry> m_entries;
   int m_nextId = 1;
   int m_activeCount = 0;
+  QString m_storagePath;
+  bool m_loaded = false;
 };

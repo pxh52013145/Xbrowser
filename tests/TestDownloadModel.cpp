@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 
 #include <QDateTime>
+#include <QTemporaryDir>
 
 #include "core/DownloadModel.h"
 
@@ -11,6 +12,10 @@ class TestDownloadModel final : public QObject
 private slots:
   void addAndFinish_updatesStateAndActiveCount()
   {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
     DownloadModel model;
     QCOMPARE(model.activeCount(), 0);
     QCOMPARE(model.rowCount(), 0);
@@ -29,6 +34,10 @@ private slots:
 
   void clearFinished_removesCompletedEntries()
   {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
     DownloadModel model;
     model.addStarted("https://a", "a.bin");
     model.markFinished("https://a", "a.bin", true);
@@ -43,6 +52,10 @@ private slots:
 
   void clearAll_resetsEntries()
   {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
     DownloadModel model;
     model.addStarted("https://a", "a.bin");
     model.markFinished("https://a", "a.bin", true);
@@ -55,6 +68,10 @@ private slots:
 
   void clearRange_removesEntriesInRange()
   {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
     DownloadModel model;
     const qint64 fromMs = QDateTime::currentMSecsSinceEpoch() - 60'000;
 
@@ -65,6 +82,29 @@ private slots:
     const qint64 toMs = QDateTime::currentMSecsSinceEpoch() + 60'000;
     model.clearRange(fromMs, toMs);
     QCOMPARE(model.rowCount(), 0);
+  }
+
+  void persistsBetweenInstances()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    {
+      DownloadModel model;
+      model.addStarted("https://a", "a.bin");
+      model.markFinished("https://a", "a.bin", true);
+      QCOMPARE(model.rowCount(), 1);
+      QCOMPARE(model.activeCount(), 0);
+    }
+
+    DownloadModel loaded;
+    QCOMPARE(loaded.rowCount(), 1);
+    QCOMPARE(loaded.activeCount(), 0);
+
+    const QModelIndex idx = loaded.index(0, 0);
+    QCOMPARE(loaded.data(idx, DownloadModel::StateRole).toString(), QStringLiteral("completed"));
+    QCOMPARE(loaded.data(idx, DownloadModel::SuccessRole).toBool(), true);
   }
 };
 
