@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml
 import QtQuick.Window
 import Qt.labs.platform as Platform
 
@@ -216,6 +217,37 @@ ApplicationWindow {
             MenuItem { text: "New Incognito Window"; onTriggered: commands.invoke("new-incognito-window") }
             MenuItem { text: "Open File…"; onTriggered: commands.invoke("open-file") }
             MenuItem { text: "Close Tab"; onTriggered: commands.invoke("close-tab") }
+            MenuItem {
+                text: "Restore Closed Tab"
+                enabled: browser.recentlyClosedCount > 0
+                onTriggered: commands.invoke("restore-closed-tab")
+            }
+            Menu {
+                id: recentlyClosedMenu
+                title: "Recently Closed"
+                enabled: browser.recentlyClosedCount > 0
+
+                Instantiator {
+                    model: {
+                        browser.recentlyClosedCount
+                        return browser.recentlyClosedItems(10)
+                    }
+                    onObjectAdded: recentlyClosedMenu.insertItem(index, object)
+                    onObjectRemoved: recentlyClosedMenu.removeItem(object)
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: String(modelData.title || modelData.url || "")
+                        onTriggered: browser.restoreRecentlyClosed(index)
+                    }
+                }
+
+                MenuSeparator { }
+                MenuItem {
+                    text: "Clear Recently Closed"
+                    enabled: browser.recentlyClosedCount > 0
+                    onTriggered: browser.clearRecentlyClosed()
+                }
+            }
             MenuSeparator { }
             MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
             MenuSeparator { }

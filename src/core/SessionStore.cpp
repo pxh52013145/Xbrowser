@@ -17,7 +17,7 @@
 
 namespace
 {
-constexpr int kSessionVersion = 2;
+constexpr int kSessionVersion = 3;
 
 QString sessionPath()
 {
@@ -49,6 +49,11 @@ void SessionStore::attach(BrowserController* browser, SplitViewController* split
 
   restoreNow();
   connectWorkspaceModels();
+
+  if (m_browser && !m_connected.contains(m_browser)) {
+    m_connected.insert(m_browser);
+    connect(m_browser, &BrowserController::recentlyClosedChanged, this, &SessionStore::scheduleSave);
+  }
 
   if (m_splitView && !m_connected.contains(m_splitView)) {
     m_connected.insert(m_splitView);
@@ -147,7 +152,7 @@ bool SessionStore::restoreNow(QString* error)
   const QJsonObject root = doc.object();
   const int version = root.value("version").toInt(1);
   const bool needsUpgrade = version < kSessionVersion;
-  if (version != 1 && version != kSessionVersion) {
+  if (version < 1 || version > kSessionVersion) {
     if (error) {
       *error = QStringLiteral("Unsupported session version: %1").arg(version);
     }
@@ -236,6 +241,30 @@ bool SessionStore::restoreNow(QString* error)
     workspaces->setActiveIndex(activeWorkspaceIndex);
   } else if (workspaces->activeIndex() < 0) {
     workspaces->setActiveIndex(0);
+  }
+
+  {
+    QVector<BrowserController::RecentlyClosedTab> recentlyClosed;
+    const QJsonArray closedArr = root.value("recentlyClosedTabs").toArray();
+    recentlyClosed.reserve(closedArr.size());
+
+    for (const QJsonValue& closedVal : closedArr) {
+      const QJsonObject obj = closedVal.toObject();
+
+      BrowserController::RecentlyClosedTab entry;
+      entry.workspaceId = obj.value("workspaceId").toInt(0);
+      entry.url = QUrl(obj.value("url").toString());
+      entry.initialUrl = QUrl(obj.value("initialUrl").toString());
+      entry.pageTitle = obj.value("pageTitle").toString();
+      entry.customTitle = obj.value("customTitle").toString();
+      entry.essential = obj.value("essential").toBool(false);
+      entry.groupId = obj.value("groupId").toInt(0);
+      entry.faviconUrl = QUrl(obj.value("faviconUrl").toString());
+      entry.closedAtMs = static_cast<qint64>(obj.value("closedAtMs").toDouble(0));
+      recentlyClosed.push_back(entry);
+    }
+
+    m_browser->setRecentlyClosedTabs(recentlyClosed);
   }
 
   if (m_splitView) {
@@ -343,6 +372,27 @@ bool SessionStore::saveNow(QString* error) const
   root.insert("savedAtMs", QDateTime::currentMSecsSinceEpoch());
   root.insert("activeWorkspaceId", workspaces->activeWorkspaceId());
   root.insert("workspaces", workspacesArr);
+
+  {
+    QJsonArray closedArr;
+    const QVector<BrowserController::RecentlyClosedTab> recentlyClosed = m_browser->recentlyClosedTabs();
+
+    for (const BrowserController::RecentlyClosedTab& entry : recentlyClosed) {
+      QJsonObject obj;
+      obj.insert("workspaceId", entry.workspaceId);
+      obj.insert("url", entry.url.toString(QUrl::FullyEncoded));
+      obj.insert("initialUrl", entry.initialUrl.toString(QUrl::FullyEncoded));
+      obj.insert("pageTitle", entry.pageTitle);
+      obj.insert("customTitle", entry.customTitle);
+      obj.insert("essential", entry.essential);
+      obj.insert("groupId", entry.groupId);
+      obj.insert("faviconUrl", entry.faviconUrl.toString(QUrl::FullyEncoded));
+      obj.insert("closedAtMs", static_cast<double>(entry.closedAtMs));
+      closedArr.push_back(obj);
+    }
+
+    root.insert("recentlyClosedTabs", closedArr);
+  }
 
   if (m_splitView) {
     QJsonObject splitObj;

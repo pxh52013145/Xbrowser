@@ -14,8 +14,22 @@ class BrowserController : public QObject
   Q_PROPERTY(TabGroupModel* tabGroups READ tabGroups NOTIFY tabGroupsChanged)
   Q_PROPERTY(WorkspaceModel* workspaces READ workspaces CONSTANT)
   Q_PROPERTY(AppSettings* settings READ settings CONSTANT)
+  Q_PROPERTY(int recentlyClosedCount READ recentlyClosedCount NOTIFY recentlyClosedChanged)
 
 public:
+  struct RecentlyClosedTab
+  {
+    int workspaceId = 0;
+    QUrl url;
+    QUrl initialUrl;
+    QString pageTitle;
+    QString customTitle;
+    bool essential = false;
+    int groupId = 0;
+    QUrl faviconUrl;
+    qint64 closedAtMs = 0;
+  };
+
   explicit BrowserController(QObject* parent = nullptr);
 
   TabModel* tabs();
@@ -54,14 +68,29 @@ public:
   Q_INVOKABLE void duplicateTabById(int tabId);
   Q_INVOKABLE bool restoreLastClosedTab();
 
+  int recentlyClosedCount() const;
+  Q_INVOKABLE QVariantList recentlyClosedItems(int limit = 10) const;
+  Q_INVOKABLE bool restoreRecentlyClosed(int index);
+  Q_INVOKABLE void clearRecentlyClosed();
+
+  QVector<RecentlyClosedTab> recentlyClosedTabs() const;
+  void setRecentlyClosedTabs(const QVector<RecentlyClosedTab>& tabs);
+
   Q_INVOKABLE void moveTabToWorkspace(int tabId, int workspaceIndex);
 
 signals:
   void tabsChanged();
   void tabGroupsChanged();
+  void recentlyClosedChanged();
 
 private:
+  static constexpr int kMaxRecentlyClosed = 50;
+
+  void recordRecentlyClosed(const RecentlyClosedTab& tab);
+  int workspaceIndexForId(int workspaceId) const;
+
   WorkspaceModel m_workspaces;
   AppSettings m_settings;
   int m_lastWorkspaceIndex = -1;
+  QVector<RecentlyClosedTab> m_recentlyClosed;
 };

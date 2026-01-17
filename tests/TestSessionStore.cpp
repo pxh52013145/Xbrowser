@@ -145,6 +145,100 @@ private slots:
       QVERIFY(qAbs(split.gridSplitRatioY() - 0.72) < 0.0001);
     }
   }
+
+  void saveAndRestore_roundTripsRecentlyClosedTabs()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    {
+      BrowserController browser;
+      SplitViewController split;
+      split.setBrowser(&browser);
+
+      SessionStore store;
+      store.attach(&browser, &split);
+
+      browser.workspaces()->clear();
+      QCOMPARE(browser.workspaces()->count(), 0);
+
+      const int ws0 = browser.workspaces()->addWorkspaceWithId(1, "One");
+      const int ws1 = browser.workspaces()->addWorkspaceWithId(2, "Two");
+      QCOMPARE(ws0, 0);
+      QCOMPARE(ws1, 1);
+
+      TabModel* tabs0 = browser.workspaces()->tabsForIndex(ws0);
+      QVERIFY(tabs0);
+      tabs0->addTabWithId(10, QUrl("https://a.example"), "A", false);
+      tabs0->addTabWithId(11, QUrl("https://b.example"), "B", false);
+
+      TabModel* tabs1 = browser.workspaces()->tabsForIndex(ws1);
+      QVERIFY(tabs1);
+      tabs1->addTabWithId(20, QUrl("https://c.example"), "C", false);
+
+      browser.workspaces()->setActiveIndex(ws0);
+      browser.closeTab(0); // A
+
+      browser.workspaces()->setActiveIndex(ws1);
+      browser.closeTab(0); // C
+
+      browser.workspaces()->setActiveIndex(ws0);
+      browser.closeTab(0); // B
+
+      QCOMPARE(browser.recentlyClosedCount(), 3);
+
+      const QVariantList items = browser.recentlyClosedItems(10);
+      QCOMPARE(items.size(), 3);
+
+      QCOMPARE(items.at(0).toMap().value("workspaceId").toInt(), 1);
+      QCOMPARE(items.at(0).toMap().value("url").toString(), QUrl("https://b.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(items.at(0).toMap().value("title").toString(), QStringLiteral("B"));
+
+      QCOMPARE(items.at(1).toMap().value("workspaceId").toInt(), 2);
+      QCOMPARE(items.at(1).toMap().value("url").toString(), QUrl("https://c.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(items.at(1).toMap().value("title").toString(), QStringLiteral("C"));
+
+      QCOMPARE(items.at(2).toMap().value("workspaceId").toInt(), 1);
+      QCOMPARE(items.at(2).toMap().value("url").toString(), QUrl("https://a.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(items.at(2).toMap().value("title").toString(), QStringLiteral("A"));
+
+      QVERIFY(browser.restoreRecentlyClosed(1)); // Restore C (middle)
+      QCOMPARE(browser.workspaces()->activeWorkspaceId(), 2);
+
+      TabModel* restoredWs1Tabs = browser.workspaces()->tabsForIndex(ws1);
+      QVERIFY(restoredWs1Tabs);
+      QCOMPARE(restoredWs1Tabs->count(), 1);
+      QCOMPARE(restoredWs1Tabs->urlAt(0), QUrl("https://c.example"));
+
+      QCOMPARE(browser.recentlyClosedCount(), 2);
+      const QVariantList afterRestore = browser.recentlyClosedItems(10);
+      QCOMPARE(afterRestore.size(), 2);
+      QCOMPARE(afterRestore.at(0).toMap().value("url").toString(), QUrl("https://b.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(afterRestore.at(1).toMap().value("url").toString(), QUrl("https://a.example").toString(QUrl::FullyEncoded));
+
+      QString error;
+      QVERIFY(store.saveNow(&error));
+      QCOMPARE(error, QString());
+    }
+
+    {
+      BrowserController browser;
+      SplitViewController split;
+      split.setBrowser(&browser);
+
+      SessionStore store;
+      store.attach(&browser, &split);
+
+      QCOMPARE(browser.recentlyClosedCount(), 2);
+      const QVariantList items = browser.recentlyClosedItems(10);
+      QCOMPARE(items.size(), 2);
+      QCOMPARE(items.at(0).toMap().value("url").toString(), QUrl("https://b.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(items.at(0).toMap().value("workspaceId").toInt(), 1);
+      QCOMPARE(items.at(1).toMap().value("url").toString(), QUrl("https://a.example").toString(QUrl::FullyEncoded));
+      QCOMPARE(items.at(1).toMap().value("workspaceId").toInt(), 1);
+    }
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSessionStore)
