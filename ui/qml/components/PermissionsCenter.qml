@@ -12,8 +12,10 @@ Item {
 
     property bool embedded: false
     property string searchText: ""
+    property int selectedKind: 0
     property string selectedOrigin: ""
     property var originsList: []
+    property var filteredOrigins: []
 
     function permissionLabel(kind) {
         switch (kind) {
@@ -36,6 +38,7 @@ Item {
     function refreshOrigins() {
         if (!root.store || !root.store.origins) {
             root.originsList = []
+            root.filteredOrigins = []
             return
         }
         root.originsList = root.store.origins()
@@ -45,7 +48,46 @@ Item {
                 root.selectedOrigin = ""
             }
         }
+        root.applyFilters()
     }
+
+    function applyFilters() {
+        const all = root.originsList || []
+        const q = (root.searchText || "").trim().toLowerCase()
+        const kind = Number(root.selectedKind || 0)
+
+        const out = []
+        for (let i = 0; i < all.length; i++) {
+            const origin = String(all[i] || "")
+            if (origin.length === 0) {
+                continue
+            }
+
+            if (q.length > 0 && origin.toLowerCase().indexOf(q) < 0) {
+                continue
+            }
+
+            if (kind > 0 && root.store && root.store.decision) {
+                const state = Number(root.store.decision(origin, kind) || 0)
+                if (state === 0) {
+                    continue
+                }
+            }
+
+            out.push(origin)
+        }
+
+        root.filteredOrigins = out
+
+        if (root.selectedOrigin && root.selectedOrigin.length > 0) {
+            if (out.indexOf(root.selectedOrigin) < 0) {
+                root.selectedOrigin = ""
+            }
+        }
+    }
+
+    onSearchTextChanged: root.applyFilters()
+    onSelectedKindChanged: root.applyFilters()
 
     Rectangle {
         id: panel
@@ -103,6 +145,28 @@ Item {
                     onTextChanged: root.searchText = text
                 }
 
+                ComboBox {
+                    Layout.preferredWidth: 200
+                    enabled: root.store
+                    model: [
+                        "All types",
+                        root.permissionLabel(1),
+                        root.permissionLabel(2),
+                        root.permissionLabel(3),
+                        root.permissionLabel(4),
+                        root.permissionLabel(5),
+                        root.permissionLabel(6),
+                        root.permissionLabel(7),
+                        root.permissionLabel(8),
+                        root.permissionLabel(9),
+                        root.permissionLabel(10),
+                        root.permissionLabel(11),
+                        root.permissionLabel(12)
+                    ]
+                    currentIndex: root.selectedKind
+                    onActivated: root.selectedKind = currentIndex
+                }
+
                 Button {
                     text: "Reset all"
                     enabled: root.store
@@ -114,6 +178,14 @@ Item {
                         }
                     }
                 }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: root.filteredOrigins.length + " / " + root.originsList.length + " sites"
+                opacity: 0.65
+                font.pixelSize: 12
+                visible: root.store
             }
 
             Frame {
@@ -132,7 +204,7 @@ Item {
                             id: originsView
                             anchors.fill: parent
                             clip: true
-                            model: root.originsList
+                            model: root.filteredOrigins
                             currentIndex: -1
 
                             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -142,17 +214,7 @@ Item {
                                 required property int index
 
                                 readonly property string origin: String(modelData || "")
-                                readonly property bool matchesSearch: {
-                                    const q = (root.searchText || "").trim().toLowerCase()
-                                    if (q.length === 0) {
-                                        return true
-                                    }
-                                    return origin.toLowerCase().indexOf(q) >= 0
-                                }
-
                                 width: ListView.view.width
-                                height: matchesSearch ? implicitHeight : 0
-                                visible: matchesSearch
                                 text: origin
                                 highlighted: root.selectedOrigin === origin
                                 onClicked: root.selectedOrigin = origin
@@ -287,4 +349,3 @@ Item {
         function onRevisionChanged() { root.refreshOrigins() }
     }
 }
-
