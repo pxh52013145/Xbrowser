@@ -16,6 +16,13 @@ public:
 
   int revision() const;
 
+  Q_INVOKABLE int visiblePinnedCountForWidth(
+    int pinnedCount,
+    int availableWidth,
+    int buttonWidth,
+    int spacing,
+    int overflowButtonWidth) const;
+
   Q_INVOKABLE QStringList pinnedExtensionIds();
   Q_INVOKABLE bool isPinned(const QString& extensionId);
   Q_INVOKABLE void setPinned(const QString& extensionId, bool pinned);

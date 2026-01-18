@@ -2768,13 +2768,66 @@ ApplicationWindow {
                 }
             }
 
+            ExtensionsFilterModel {
+                id: pinnedExtensionsModel
+                sourceExtensions: extensions
+                pinnedOnly: true
+            }
+
             RowLayout {
                 id: extensionsToolbar
                 visible: showTopBar
                 spacing: 2
+                readonly property int maxWidth: Math.max(extensionsOverflowButton.width, Math.min(320, Math.round(topBar.width * 0.25)))
+                Layout.maximumWidth: maxWidth
+                clip: true
+
+                readonly property int buttonSize: 34
+                readonly property int pinnedCount: pinnedExtensionsRepeater.count
+                readonly property int availableWidth: Math.max(0, maxWidth)
+                readonly property int visiblePinnedCount: extensionsStore.visiblePinnedCountForWidth(
+                                                        pinnedCount,
+                                                        availableWidth,
+                                                        buttonSize,
+                                                        spacing,
+                                                        extensionsOverflowButton.width)
+                readonly property bool overflowNeeded: pinnedCount > visiblePinnedCount
+
+                function buildOverflowMenuItems() {
+                    const items = []
+                    const start = Math.max(0, visiblePinnedCount)
+                    for (let i = start; i < pinnedExtensionsRepeater.count; ++i) {
+                        const button = pinnedExtensionsRepeater.itemAt(i)
+                        if (!button) {
+                            continue
+                        }
+
+                        const id = String(button.extensionId || "")
+                        if (!id || id.length === 0) {
+                            continue
+                        }
+
+                        const displayName = String(button.name || id || "Extension")
+                        items.push({
+                            action: "ext-open-popup",
+                            text: displayName + (button.enabled === true ? "" : " (disabled)"),
+                            enabled: true,
+                            args: {
+                                extensionId: id,
+                                name: displayName,
+                                popupUrl: String(button.popupUrl || ""),
+                                optionsUrl: String(button.optionsUrl || ""),
+                                enabled: button.enabled === true,
+                                pinned: true,
+                            },
+                        })
+                    }
+                    return items
+                }
 
                 Repeater {
-                    model: extensions
+                    id: pinnedExtensionsRepeater
+                    model: pinnedExtensionsModel
 
                     delegate: ToolButton {
                         id: pinnedExtensionButton
@@ -2786,7 +2839,9 @@ ApplicationWindow {
                         required property string popupUrl
                         required property string optionsUrl
 
-                        visible: pinned
+                        visible: index < extensionsToolbar.visiblePinnedCount
+                        width: extensionsToolbar.buttonSize
+                        height: extensionsToolbar.buttonSize
                         display: (iconUrl && iconUrl.toString().length > 0) ? AbstractButton.IconOnly : AbstractButton.TextOnly
                         icon.source: iconUrl
                         icon.width: 18
@@ -2829,6 +2884,33 @@ ApplicationWindow {
                                 popupManager.openAtPoint(extensionContextMenuComponent, pos.x, pos.y)
                                 root.popupManagerContext = "extensions-context-menu"
                             }
+                        }
+                    }
+                }
+
+                ToolButton {
+                    id: extensionsOverflowButton
+                    visible: extensionsToolbar.overflowNeeded
+                    width: extensionsToolbar.buttonSize
+                    height: extensionsToolbar.buttonSize
+                    text: "\u22EF"
+                    onClicked: root.toggleTopBarPopup("extensions-overflow", extensionsOverflowMenuComponent, extensionsOverflowButton)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: "More extensions"
+                }
+
+                Component {
+                    id: extensionsOverflowMenuComponent
+
+                    ContextMenu {
+                        cornerRadius: root.uiRadius
+                        spacing: root.uiSpacing
+                        implicitWidth: 260
+                        items: extensionsToolbar.buildOverflowMenuItems()
+                        onActionTriggered: (action, args) => {
+                            popupManager.close()
+                            root.handleExtensionContextMenuAction(action, args, extensionsOverflowButton)
                         }
                     }
                 }

@@ -29,6 +29,8 @@
 #include "../core/DiagnosticsController.h"
 #include "../core/DownloadFilterModel.h"
 #include "../core/DownloadModel.h"
+#include "../core/ExtensionsStore.h"
+#include "../core/ExtensionsFilterModel.h"
 #include "../core/HistoryFilterModel.h"
 #include "../core/HistoryStore.h"
 #include "../core/LayoutController.h"
@@ -340,6 +342,7 @@ int main(int argc, char* argv[])
   qmlRegisterType<TabSwitcherModel>("XBrowser", 1, 0, "TabSwitcherModel");
   qmlRegisterType<BookmarksFilterModel>("XBrowser", 1, 0, "BookmarksFilterModel");
   qmlRegisterType<DownloadFilterModel>("XBrowser", 1, 0, "DownloadFilterModel");
+  qmlRegisterType<ExtensionsFilterModel>("XBrowser", 1, 0, "ExtensionsFilterModel");
   qmlRegisterType<HistoryFilterModel>("XBrowser", 1, 0, "HistoryFilterModel");
 
   BrowserController browser;
@@ -682,6 +685,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("quickLinks", &quickLinks);
   engine.rootContext()->setContextProperty("splitView", &splitView);
   engine.rootContext()->setContextProperty("extensions", &extensions);
+  engine.rootContext()->setContextProperty("extensionsStore", &ExtensionsStore::instance());
   engine.rootContext()->setContextProperty("diagnostics", &diagnostics);
   engine.rootContext()->setContextProperty("sitePermissions", &sitePermissions);
   engine.load(QUrl("qrc:/ui/qml/Main.qml"));

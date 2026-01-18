@@ -440,7 +440,26 @@ Item {
                                             spacing: 6
                                             visible: detailsHost.entry && detailsHost.entry.permissions && detailsHost.entry.permissions.length > 0
 
-                                            Label { text: "Permissions"; font.bold: true; opacity: 0.9 }
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: "Permissions"
+                                                    font.bold: true
+                                                    opacity: 0.9
+                                                }
+
+                                                ToolButton {
+                                                    text: "Copy"
+                                                    onClicked: {
+                                                        const list = detailsHost.entry ? (detailsHost.entry.permissions || []) : []
+                                                        const text = list.map(v => String(v)).join("\n")
+                                                        commands.invoke("copy-text", { text })
+                                                    }
+                                                }
+                                            }
 
                                             Repeater {
                                                 model: detailsHost.entry ? (detailsHost.entry.permissions || []) : []
@@ -459,7 +478,44 @@ Item {
                                             spacing: 6
                                             visible: detailsHost.entry && detailsHost.entry.hostPermissions && detailsHost.entry.hostPermissions.length > 0
 
-                                            Label { text: "Host permissions"; font.bold: true; opacity: 0.9 }
+                                            readonly property bool hasAllUrls: {
+                                                const list = detailsHost.entry ? (detailsHost.entry.hostPermissions || []) : []
+                                                for (const v of list) {
+                                                    if (String(v) === "<all_urls>") {
+                                                        return true
+                                                    }
+                                                }
+                                                return false
+                                            }
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: "Host permissions"
+                                                    font.bold: true
+                                                    opacity: 0.9
+                                                }
+
+                                                ToolButton {
+                                                    text: "Copy"
+                                                    onClicked: {
+                                                        const list = detailsHost.entry ? (detailsHost.entry.hostPermissions || []) : []
+                                                        const text = list.map(v => String(v)).join("\n")
+                                                        commands.invoke("copy-text", { text })
+                                                    }
+                                                }
+                                            }
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                visible: hasAllUrls
+                                                text: "Warning: this extension requests <all_urls> (site access to all websites)."
+                                                wrapMode: Text.Wrap
+                                                color: "#b91c1c"
+                                            }
 
                                             Repeater {
                                                 model: detailsHost.entry ? (detailsHost.entry.hostPermissions || []) : []

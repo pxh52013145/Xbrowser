@@ -10,6 +10,7 @@ qt_add_executable(xbrowser
   core/DiagnosticsController.cpp
   core/DownloadFilterModel.cpp
   core/DownloadModel.cpp
+  core/ExtensionsFilterModel.cpp
   core/ExtensionsStore.cpp
   core/HistoryFilterModel.cpp
   core/HistoryStore.cpp

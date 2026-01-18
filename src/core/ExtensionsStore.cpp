@@ -33,6 +33,48 @@ int ExtensionsStore::revision() const
   return m_revision;
 }
 
+int ExtensionsStore::visiblePinnedCountForWidth(
+  int pinnedCount,
+  int availableWidth,
+  int buttonWidth,
+  int spacing,
+  int overflowButtonWidth) const
+{
+  const int count = qMax(0, pinnedCount);
+  const int width = qMax(0, availableWidth);
+  const int button = qMax(0, buttonWidth);
+  const int gap = qMax(0, spacing);
+  const int overflow = qMax(0, overflowButtonWidth);
+
+  if (count <= 0 || width <= 0 || button <= 0) {
+    return 0;
+  }
+
+  const auto widthForPinned = [button, gap](int n) -> qint64 {
+    if (n <= 0) {
+      return 0;
+    }
+    return static_cast<qint64>(n) * button + static_cast<qint64>(qMax(0, n - 1)) * gap;
+  };
+
+  if (widthForPinned(count) <= width) {
+    return count;
+  }
+
+  const int step = button + gap;
+  if (step <= 0 || overflow <= 0) {
+    return 0;
+  }
+
+  const qint64 remaining = static_cast<qint64>(width) - overflow;
+  if (remaining <= 0) {
+    return 0;
+  }
+
+  const int visible = static_cast<int>(remaining / step);
+  return qBound(0, visible, qMax(0, count - 1));
+}
+
 void ExtensionsStore::ensureStoragePath()
 {
   const QString nextPath = QDir(xbrowser::appDataRoot()).filePath(QStringLiteral("extensions.json"));
