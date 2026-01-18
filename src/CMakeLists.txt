@@ -43,6 +43,8 @@ if(WIN32)
   target_sources(xbrowser PRIVATE
     platform/windows/NativeUtils.cpp
     platform/windows/NativeUtils.h
+    platform/windows/WindowsShareController.cpp
+    platform/windows/WindowsShareController.h
     platform/windows/WindowChromeController.cpp
     platform/windows/WindowChromeController.h
   )
@@ -61,7 +63,7 @@ target_link_libraries(xbrowser PRIVATE
 )
 
 if(WIN32)
-  target_link_libraries(xbrowser PRIVATE ole32 user32 shlwapi)
+  target_link_libraries(xbrowser PRIVATE ole32 user32 shlwapi runtimeobject)
 endif()
 
 target_compile_definitions(xbrowser PRIVATE

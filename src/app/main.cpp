@@ -53,6 +53,7 @@
 #include "../engine/webview2/WebView2CookieModel.h"
 #include "../engine/webview2/WebView2View.h"
 #include "../platform/windows/NativeUtils.h"
+#include "../platform/windows/WindowsShareController.h"
 #include "../platform/windows/WindowChromeController.h"
 
 namespace
@@ -354,6 +355,7 @@ int main(int argc, char* argv[])
   NotificationCenter notifications;
   ToastController toast;
   NativeUtils nativeUtils;
+  WindowsShareController shareController;
   DownloadModel downloads;
   BookmarksStore bookmarks;
   HistoryStore history;
@@ -383,7 +385,7 @@ int main(int argc, char* argv[])
     &commands,
     &CommandBus::commandInvoked,
     &browser,
-    [&browser, &splitView, &toast](const QString& id, const QVariantMap& args) {
+    [&browser, &splitView, &toast, &shareController](const QString& id, const QVariantMap& args) {
     if (id == "new-window") {
       const QString profileId =
         QStringLiteral("window-%1").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
@@ -679,9 +681,14 @@ int main(int argc, char* argv[])
         return;
       }
 
+      const QString title = model->titleAt(index).trimmed();
+      if (shareController.canShare() && shareController.shareUrl(title, url)) {
+        return;
+      }
+
       QUrl mail(QStringLiteral("mailto:"));
       QUrlQuery query;
-      query.addQueryItem(QStringLiteral("subject"), QStringLiteral("Link"));
+      query.addQueryItem(QStringLiteral("subject"), title.isEmpty() ? QStringLiteral("Link") : title);
       query.addQueryItem(QStringLiteral("body"), url.toString(QUrl::FullyEncoded));
       mail.setQuery(query);
 
@@ -732,6 +739,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("notifications", &notifications);
   engine.rootContext()->setContextProperty("toast", &toast);
   engine.rootContext()->setContextProperty("nativeUtils", &nativeUtils);
+  engine.rootContext()->setContextProperty("shareController", &shareController);
   engine.rootContext()->setContextProperty("downloads", &downloads);
   engine.rootContext()->setContextProperty("bookmarks", &bookmarks);
   engine.rootContext()->setContextProperty("history", &history);

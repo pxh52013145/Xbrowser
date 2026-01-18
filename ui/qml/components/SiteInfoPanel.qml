@@ -9,6 +9,7 @@ Rectangle {
     property int spacing: 8
 
     required property url pageUrl
+    property bool canShare: false
 
     signal closeRequested()
     signal permissionsRequested()
@@ -108,12 +109,14 @@ Rectangle {
 
             Button {
                 Layout.fillWidth: true
+                visible: !root.canShare
                 text: "Copy URL"
                 onClicked: root.copyUrlRequested()
             }
 
             Button {
                 Layout.fillWidth: true
+                visible: root.canShare
                 text: "Share URL"
                 onClicked: root.shareUrlRequested()
             }
@@ -137,4 +140,3 @@ Rectangle {
         }
     }
 }
-

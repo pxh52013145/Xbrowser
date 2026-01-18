@@ -250,7 +250,15 @@ ApplicationWindow {
             }
             MenuSeparator { }
             MenuItem { text: "Open in Default Browser"; onTriggered: commands.invoke("open-external-url", { tabId: root.focusedTabId }) }
-            MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
+            MenuItem {
+                text: (shareController && shareController.canShare) ? "Share URL" : "Copy URL"
+                enabled: root.focusedView
+                         && root.focusedView.currentUrl
+                         && root.focusedView.currentUrl.toString
+                         && root.focusedView.currentUrl.toString().length > 0
+                         && root.focusedView.currentUrl.toString() !== "about:blank"
+                onTriggered: commands.invoke((shareController && shareController.canShare) ? "share-url" : "copy-url", { tabId: root.focusedTabId })
+            }
             MenuSeparator { }
             MenuItem { text: "Print"; onTriggered: commands.invoke("open-print") }
             MenuSeparator { }
@@ -1081,6 +1089,19 @@ ApplicationWindow {
             text: "Open in default browser",
             enabled: view.currentUrl && view.currentUrl.toString && view.currentUrl.toString().length > 0 && view.currentUrl.toString() !== "about:blank"
         })
+        if (shareController && shareController.canShare) {
+            items.push({
+                action: "share-page",
+                text: "Share page",
+                enabled: view.currentUrl && view.currentUrl.toString && view.currentUrl.toString().length > 0 && view.currentUrl.toString() !== "about:blank"
+            })
+        } else {
+            items.push({
+                action: "copy-page",
+                text: "Copy page address",
+                enabled: view.currentUrl && view.currentUrl.toString && view.currentUrl.toString().length > 0 && view.currentUrl.toString() !== "about:blank"
+            })
+        }
 
         const link = info.linkUri ? String(info.linkUri) : ""
         const src = info.sourceUri ? String(info.sourceUri) : ""
@@ -1124,6 +1145,10 @@ ApplicationWindow {
             view.reload()
         } else if (action === "open-external-page") {
             commands.invoke("open-external-url", { tabId: webContextMenuTabId })
+        } else if (action === "share-page") {
+            commands.invoke("share-url", { tabId: webContextMenuTabId })
+        } else if (action === "copy-page") {
+            commands.invoke("copy-url", { tabId: webContextMenuTabId })
         } else if (action === "open-link-new-tab" && link.length > 0) {
             commands.invoke("new-tab", { url: link })
         } else if (action === "open-link-split" && link.length > 0) {
@@ -1971,6 +1996,7 @@ ApplicationWindow {
             cornerRadius: root.uiRadius
             spacing: root.uiSpacing
             pageUrl: root.focusedView ? root.focusedView.currentUrl : ""
+            canShare: shareController && shareController.canShare
             onCloseRequested: popupManager.close()
             onPermissionsRequested: root.toggleTopBarPopup("site-permissions", sitePermissionsPanelComponent, sitePanelButton)
             onSiteDataRequested: root.toggleTopBarPopup("site-data", siteDataPanelComponent, sitePanelButton)
@@ -2751,6 +2777,21 @@ ApplicationWindow {
                     bookmarks.toggleBookmark(view.currentUrl, view.title)
                     toast.showToast(wasBookmarked ? "Bookmark removed" : "Bookmarked")
                 }
+            }
+
+            ToolButton {
+                id: shareUrlButton
+                visible: showTopBar
+                text: (shareController && shareController.canShare) ? "Share" : "Copy"
+                enabled: root.focusedView
+                         && root.focusedView.currentUrl
+                         && root.focusedView.currentUrl.toString
+                         && root.focusedView.currentUrl.toString().length > 0
+                         && root.focusedView.currentUrl.toString() !== "about:blank"
+                onClicked: commands.invoke((shareController && shareController.canShare) ? "share-url" : "copy-url", { tabId: root.focusedTabId })
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                ToolTip.text: (shareController && shareController.canShare) ? "Share URL" : "Copy URL"
             }
 
             Item {
