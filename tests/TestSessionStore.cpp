@@ -246,6 +246,126 @@ private slots:
       QCOMPARE(items.at(1).toMap().value("workspaceId").toInt(), 1);
     }
   }
+
+  void recentlyClosed_enforcesLimitAndOrder()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    BrowserController browser;
+    browser.workspaces()->clear();
+    QCOMPARE(browser.workspaces()->count(), 0);
+
+    const int ws0 = browser.workspaces()->addWorkspaceWithId(1, "One");
+    QCOMPARE(ws0, 0);
+    browser.workspaces()->setActiveIndex(ws0);
+
+    TabModel* tabs0 = browser.workspaces()->tabsForIndex(ws0);
+    QVERIFY(tabs0);
+
+    for (int i = 0; i < 60; ++i) {
+      const QString title = QStringLiteral("T%1").arg(i);
+      tabs0->addTabWithId(1000 + i, QUrl(QStringLiteral("https://t%1.example").arg(i)), title, false);
+    }
+
+    QCOMPARE(tabs0->count(), 60);
+
+    for (int i = 0; i < 60; ++i) {
+      browser.closeTab(0);
+    }
+
+    QCOMPARE(tabs0->count(), 0);
+    QCOMPARE(browser.recentlyClosedCount(), 50);
+
+    const QVariantList items = browser.recentlyClosedItems(100);
+    QCOMPARE(items.size(), 50);
+    for (int i = 0; i < items.size(); ++i) {
+      QCOMPARE(items.at(i).toMap().value("title").toString(), QStringLiteral("T%1").arg(59 - i));
+    }
+
+    QVERIFY(!browser.restoreRecentlyClosed(50));
+    QCOMPARE(browser.recentlyClosedCount(), 50);
+
+    QVERIFY(browser.restoreLastClosedTab());
+    QCOMPARE(browser.recentlyClosedCount(), 49);
+
+    TabModel* restoredTabs = browser.workspaces()->tabsForIndex(ws0);
+    QVERIFY(restoredTabs);
+    QCOMPARE(restoredTabs->count(), 1);
+    QCOMPARE(restoredTabs->pageTitleAt(0), QStringLiteral("T59"));
+  }
+
+  void recentlyClosed_restoreFallsBackToActiveWorkspace()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    BrowserController browser;
+    browser.workspaces()->clear();
+
+    const int ws0 = browser.workspaces()->addWorkspaceWithId(1, "One");
+    const int ws1 = browser.workspaces()->addWorkspaceWithId(2, "Two");
+    QCOMPARE(ws0, 0);
+    QCOMPARE(ws1, 1);
+
+    TabModel* tabs1 = browser.workspaces()->tabsForIndex(ws1);
+    QVERIFY(tabs1);
+    tabs1->addTabWithId(20, QUrl("https://gone.example"), "Gone", false);
+
+    browser.workspaces()->setActiveIndex(ws1);
+    browser.closeTab(0);
+    QCOMPARE(browser.recentlyClosedCount(), 1);
+
+    browser.workspaces()->closeWorkspace(ws1);
+    QCOMPARE(browser.workspaces()->count(), 1);
+    QCOMPARE(browser.workspaces()->activeWorkspaceId(), 1);
+
+    QVERIFY(browser.restoreLastClosedTab());
+    QCOMPARE(browser.workspaces()->activeWorkspaceId(), 1);
+
+    TabModel* restoredTabs = browser.workspaces()->tabsForIndex(0);
+    QVERIFY(restoredTabs);
+    QCOMPARE(restoredTabs->count(), 1);
+    QCOMPARE(restoredTabs->urlAt(0), QUrl("https://gone.example"));
+  }
+
+  void recentlyClosed_restoreDropsMissingGroup()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    BrowserController browser;
+    browser.workspaces()->clear();
+    const int ws0 = browser.workspaces()->addWorkspaceWithId(1, "One");
+    QCOMPARE(ws0, 0);
+
+    TabGroupModel* groups = browser.workspaces()->groupsForIndex(ws0);
+    QVERIFY(groups);
+    const int groupId = groups->addGroupWithId(10, "Group", false, QColor("#abcdef"));
+    QCOMPARE(groupId, 10);
+
+    TabModel* tabs0 = browser.workspaces()->tabsForIndex(ws0);
+    QVERIFY(tabs0);
+    tabs0->addTabWithId(30, QUrl("https://grouped.example"), "Grouped", false);
+    tabs0->setGroupIdAt(0, groupId);
+
+    browser.workspaces()->setActiveIndex(ws0);
+    browser.closeTab(0);
+    QCOMPARE(browser.recentlyClosedCount(), 1);
+
+    groups->removeGroup(0);
+    QCOMPARE(groups->count(), 0);
+
+    QVERIFY(browser.restoreLastClosedTab());
+
+    TabModel* restoredTabs = browser.workspaces()->tabsForIndex(ws0);
+    QVERIFY(restoredTabs);
+    QCOMPARE(restoredTabs->count(), 1);
+    QCOMPARE(restoredTabs->groupIdAt(0), 0);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSessionStore)
