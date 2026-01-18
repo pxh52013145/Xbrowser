@@ -157,6 +157,7 @@ struct LaunchOptions
 {
   QString dataDir;
   QString profileId;
+  QStringList startupUrls;
   bool incognito = false;
 };
 
@@ -192,15 +193,21 @@ LaunchOptions parseLaunchOptions(QCoreApplication& app)
   QCommandLineOption dataDirOpt(QStringLiteral("data-dir"), QStringLiteral("Override data directory."), QStringLiteral("dir"));
   QCommandLineOption profileOpt(QStringLiteral("profile"), QStringLiteral("Use a named profile under AppLocalDataLocation/profiles."), QStringLiteral("id"));
   QCommandLineOption incognitoOpt(QStringLiteral("incognito"), QStringLiteral("Use a temporary data directory (incognito)."));
+  QCommandLineOption urlOpt(
+    QStringLiteral("url"),
+    QStringLiteral("Open a URL on startup (may be repeated)."),
+    QStringLiteral("url"));
 
   parser.addOption(dataDirOpt);
   parser.addOption(profileOpt);
   parser.addOption(incognitoOpt);
+  parser.addOption(urlOpt);
   parser.process(app);
 
   LaunchOptions opts;
   opts.dataDir = parser.value(dataDirOpt).trimmed();
   opts.profileId = sanitizeProfileId(parser.value(profileOpt));
+  opts.startupUrls = parser.values(urlOpt);
   opts.incognito = parser.isSet(incognitoOpt);
   return opts;
 }
@@ -394,6 +401,18 @@ int main(int argc, char* argv[])
   SessionStore session;
   session.attach(&browser, &splitView);
 
+  if (!launchOptions.startupUrls.isEmpty()) {
+    for (const QString& rawUrl : launchOptions.startupUrls) {
+      const QString trimmed = rawUrl.trimmed();
+      if (trimmed.isEmpty()) {
+        continue;
+      }
+
+      const QUrl url = QUrl::fromUserInput(trimmed);
+      browser.newTab(url.isValid() ? url : QUrl("about:blank"));
+    }
+  }
+
   QObject::connect(&toast, &ToastController::actionRequested, &commands, [&commands](const QString& commandId) {
     commands.invoke(commandId);
   });
@@ -412,6 +431,46 @@ int main(int argc, char* argv[])
       if (!ok) {
         toast.showToast(QStringLiteral("Failed to open new window"));
       }
+      return;
+    }
+
+    if (id == "move-tab-to-new-window") {
+      TabModel* model = browser.tabs();
+      if (!model) {
+        return;
+      }
+
+      const int tabId = args.value("tabId").toInt();
+      if (tabId <= 0) {
+        return;
+      }
+
+      const int index = model->indexOfTabId(tabId);
+      if (index < 0) {
+        return;
+      }
+
+      QUrl url = model->urlAt(index);
+      if (!url.isValid()) {
+        url = QUrl("about:blank");
+      }
+
+      const QString profileId =
+        QStringLiteral("window-%1").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
+      const bool ok = QProcess::startDetached(
+        QCoreApplication::applicationFilePath(),
+        QStringList {
+          QStringLiteral("--profile"),
+          profileId,
+          QStringLiteral("--url"),
+          url.toString(QUrl::FullyEncoded),
+        });
+      if (!ok) {
+        toast.showToast(QStringLiteral("Failed to move tab to new window"));
+        return;
+      }
+
+      model->removeTab(index);
       return;
     }
 

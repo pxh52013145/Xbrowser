@@ -1281,6 +1281,9 @@ ApplicationWindow {
             } else {
                 items.push({ action: "new-group", text: "New Group", enabled: true, args: { tabId: resolvedTabId } })
             }
+
+            items.push({ separator: true })
+            items.push({ action: "move-to-new-window", text: "Move to New Window", enabled: true, args: { tabId: resolvedTabId } })
         }
 
         const groupCount = browser.tabGroups ? browser.tabGroups.count() : 0
@@ -1450,6 +1453,8 @@ ApplicationWindow {
             if (groupId > 0) {
                 browser.moveTabToGroup(tabId, groupId)
             }
+        } else if (action === "move-to-new-window") {
+            commands.invoke("move-tab-to-new-window", { tabId: tabId })
         } else if (action === "move-to-workspace") {
             if (!args || args.workspaceIndex === undefined) {
                 return
