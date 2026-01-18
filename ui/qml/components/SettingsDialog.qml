@@ -302,6 +302,30 @@ Item {
 
                                 CheckBox {
                                     Layout.fillWidth: true
+                                    text: "Omnibox: Web suggestions"
+                                    checked: root.settings ? root.settings.webSuggestionsEnabled : false
+                                    onToggled: if (root.settings) root.settings.webSuggestionsEnabled = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Omnibox: Action suggestions"
+                                    checked: root.settings ? root.settings.omniboxActionsEnabled : true
+                                    onToggled: if (root.settings) root.settings.omniboxActionsEnabled = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
                                     text: "Show menu bar"
                                     checked: root.settings ? root.settings.showMenuBar : false
                                     onToggled: if (root.settings) root.settings.showMenuBar = checked

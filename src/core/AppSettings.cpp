@@ -122,6 +122,36 @@ void AppSettings::setAddressBarVisible(bool visible)
   scheduleSave();
 }
 
+bool AppSettings::webSuggestionsEnabled() const
+{
+  return m_webSuggestionsEnabled;
+}
+
+void AppSettings::setWebSuggestionsEnabled(bool enabled)
+{
+  if (m_webSuggestionsEnabled == enabled) {
+    return;
+  }
+  m_webSuggestionsEnabled = enabled;
+  emit webSuggestionsEnabledChanged();
+  scheduleSave();
+}
+
+bool AppSettings::omniboxActionsEnabled() const
+{
+  return m_omniboxActionsEnabled;
+}
+
+void AppSettings::setOmniboxActionsEnabled(bool enabled)
+{
+  if (m_omniboxActionsEnabled == enabled) {
+    return;
+  }
+  m_omniboxActionsEnabled = enabled;
+  emit omniboxActionsEnabledChanged();
+  scheduleSave();
+}
+
 bool AppSettings::essentialCloseResets() const
 {
   return m_essentialCloseResets;
@@ -438,7 +468,7 @@ void AppSettings::load()
   const QJsonObject obj = doc.object();
 
   const int version = obj.value("version").toInt(1);
-  const bool needsUpgrade = version < 6;
+  const bool needsUpgrade = version < 8;
 
   const int width = obj.value("sidebarWidth").toInt(m_sidebarWidth);
   m_sidebarWidth = qBound(160, width, 520);
@@ -446,6 +476,8 @@ void AppSettings::load()
   m_sidebarOnRight = obj.value("sidebarOnRight").toBool(m_sidebarOnRight);
   m_useSingleToolbar = obj.value("useSingleToolbar").toBool(m_useSingleToolbar);
   m_addressBarVisible = obj.value("addressBarVisible").toBool(m_addressBarVisible);
+  m_webSuggestionsEnabled = obj.value("webSuggestionsEnabled").toBool(m_webSuggestionsEnabled);
+  m_omniboxActionsEnabled = obj.value("omniboxActionsEnabled").toBool(m_omniboxActionsEnabled);
   m_essentialCloseResets = obj.value("essentialCloseResets").toBool(m_essentialCloseResets);
   m_compactMode = obj.value("compactMode").toBool(m_compactMode);
   m_reduceMotion = obj.value("reduceMotion").toBool(m_reduceMotion);
@@ -510,12 +542,14 @@ bool AppSettings::saveNow(QString* error) const
   }
 
   QJsonObject obj;
-  obj.insert("version", 6);
+  obj.insert("version", 8);
   obj.insert("sidebarWidth", m_sidebarWidth);
   obj.insert("sidebarExpanded", m_sidebarExpanded);
   obj.insert("sidebarOnRight", m_sidebarOnRight);
   obj.insert("useSingleToolbar", m_useSingleToolbar);
   obj.insert("addressBarVisible", m_addressBarVisible);
+  obj.insert("webSuggestionsEnabled", m_webSuggestionsEnabled);
+  obj.insert("omniboxActionsEnabled", m_omniboxActionsEnabled);
   obj.insert("essentialCloseResets", m_essentialCloseResets);
   obj.insert("compactMode", m_compactMode);
   obj.insert("reduceMotion", m_reduceMotion);

@@ -84,6 +84,44 @@ private:
   QVector<Entry> m_entries;
   QByteArray m_timeRoleName;
 };
+
+class MockWebSuggestionsProvider final : public WebSuggestionsProvider
+{
+  Q_OBJECT
+
+public:
+  explicit MockWebSuggestionsProvider(QObject* parent = nullptr)
+    : WebSuggestionsProvider(parent)
+  {
+  }
+
+  void requestSuggestions(const QString& query) override
+  {
+    m_queries.push_back(query);
+    emit requested(query);
+  }
+
+  int requestCount() const
+  {
+    return m_queries.size();
+  }
+
+  QString lastQuery() const
+  {
+    return m_queries.isEmpty() ? QString() : m_queries.last();
+  }
+
+  void respond(const QString& query, const QByteArray& payload)
+  {
+    emit suggestionsResponseReceived(query, payload);
+  }
+
+signals:
+  void requested(const QString& query);
+
+private:
+  QStringList m_queries;
+};
 }
 
 class TestOmniboxUtils final : public QObject
@@ -274,6 +312,52 @@ private slots:
     const QVariantMap second = hits.at(1).toMap();
     QCOMPARE(first.value("title").toString(), QStringLiteral("Beta"));
     QCOMPARE(second.value("title").toString(), QStringLiteral("Gamma"));
+  }
+
+  void webSuggestions_debouncesProviderRequests()
+  {
+    OmniboxUtils utils;
+    utils.setWebSuggestionsEnabled(true);
+
+    auto* provider = new MockWebSuggestionsProvider(&utils);
+    utils.setWebSuggestionsProvider(provider);
+
+    QSignalSpy requestedSpy(provider, &MockWebSuggestionsProvider::requested);
+    QVERIFY(requestedSpy.isValid());
+
+    utils.requestWebSuggestions("a", 6);
+    utils.requestWebSuggestions("ab", 6);
+    utils.requestWebSuggestions("abc", 6);
+
+    QTRY_COMPARE_WITH_TIMEOUT(requestedSpy.count(), 1, 1000);
+    QCOMPARE(requestedSpy.at(0).at(0).toString(), QStringLiteral("abc"));
+  }
+
+  void webSuggestions_parsesLimitAndSorts()
+  {
+    OmniboxUtils utils;
+    utils.setWebSuggestionsEnabled(true);
+
+    auto* provider = new MockWebSuggestionsProvider(&utils);
+    utils.setWebSuggestionsProvider(provider);
+
+    QObject::connect(provider, &MockWebSuggestionsProvider::requested, provider, [provider](const QString& query) {
+      const QByteArray payload = R"(["abc",["aXbYc","abXc","abc","foo"]])";
+      provider->respond(query, payload);
+    });
+
+    QSignalSpy readySpy(&utils, &OmniboxUtils::webSuggestionsReady);
+    QVERIFY(readySpy.isValid());
+
+    utils.requestWebSuggestions("abc", 2);
+
+    QTRY_COMPARE_WITH_TIMEOUT(readySpy.count(), 1, 1000);
+    QCOMPARE(readySpy.at(0).at(0).toString(), QStringLiteral("abc"));
+
+    const QVariantList suggestions = readySpy.at(0).at(1).toList();
+    QCOMPARE(suggestions.size(), 2);
+    QCOMPARE(suggestions.at(0).toString(), QStringLiteral("abXc"));
+    QCOMPARE(suggestions.at(1).toString(), QStringLiteral("aXbYc"));
   }
 };
 

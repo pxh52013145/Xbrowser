@@ -1569,6 +1569,10 @@ ApplicationWindow {
         const trimmed = raw.trim()
         const focusedUrl = currentFocusedUrlString()
 
+        if (omniboxUtils && omniboxUtils.setWebSuggestionsEnabled) {
+            omniboxUtils.setWebSuggestionsEnabled(browser && browser.settings ? browser.settings.webSuggestionsEnabled : false)
+        }
+
         omniboxModel.clear()
 
         if (!trimmed) {
@@ -1697,6 +1701,43 @@ ApplicationWindow {
             matchLength: 0,
         })
 
+        if (browser.settings.omniboxActionsEnabled) {
+            omniboxModel.append({ type: "header", title: "Actions" })
+            omniboxModel.append({
+                type: "item",
+                kind: "action",
+                title: "Open in Split (Right)",
+                subtitle: "Open in split view",
+                action: "open-split-right",
+                url: parsed.url,
+                shortcut: "",
+                matchStart: -1,
+                matchLength: 0,
+            })
+            omniboxModel.append({
+                type: "item",
+                kind: "action",
+                title: "Open in New Workspace",
+                subtitle: "Create workspace and open",
+                action: "open-new-workspace",
+                url: parsed.url,
+                shortcut: "",
+                matchStart: -1,
+                matchLength: 0,
+            })
+            omniboxModel.append({
+                type: "item",
+                kind: "action",
+                title: "Copy URL",
+                subtitle: "",
+                action: "copy-url",
+                url: parsed.url,
+                shortcut: "",
+                matchStart: -1,
+                matchLength: 0,
+            })
+        }
+
         const bookmarkHits = omniboxUtils.bookmarkSuggestions(bookmarksModel, trimmed, 6)
         if (bookmarkHits && bookmarkHits.length > 0) {
             omniboxModel.append({ type: "header", title: "Bookmarks" })
@@ -1764,6 +1805,10 @@ ApplicationWindow {
                     matchLength: ws.matchLength,
                 })
             }
+        }
+
+        if (browser.settings.webSuggestionsEnabled && parsed.kind === "search") {
+            omniboxUtils.requestWebSuggestions(trimmed, 6)
         }
 
         if (omniboxModel.count > 0) {
@@ -3052,6 +3097,59 @@ ApplicationWindow {
         id: omniboxModel
     }
 
+    Connections {
+        target: omniboxUtils
+
+        function onWebSuggestionsReady(query, suggestions) {
+            const field = root.activeAddressField()
+            if (!field || !field.activeFocus) {
+                return
+            }
+
+            const currentQuery = String(field.text || "").trim()
+            const expectedQuery = String(query || "").trim()
+            if (!currentQuery || !expectedQuery || currentQuery !== expectedQuery) {
+                return
+            }
+
+            if (currentQuery.startsWith(">") || !browser.settings.webSuggestionsEnabled) {
+                return
+            }
+
+            for (let i = omniboxModel.count - 1; i >= 0; i--) {
+                const it = omniboxModel.get(i)
+                if (it && it.group === "web-suggestions") {
+                    omniboxModel.remove(i)
+                }
+            }
+
+            if (!suggestions || suggestions.length === 0) {
+                return
+            }
+
+            omniboxModel.append({ type: "header", title: "Web Suggestions", group: "web-suggestions" })
+            for (const s of suggestions) {
+                const text = String(s || "").trim()
+                if (!text) {
+                    continue
+                }
+
+                const range = omniboxUtils.matchRange(currentQuery, text)
+                omniboxModel.append({
+                    type: "item",
+                    kind: "search",
+                    title: text,
+                    subtitle: "",
+                    url: "https://duckduckgo.com/?q=" + encodeURIComponent(text),
+                    group: "web-suggestions",
+                    shortcut: "",
+                    matchStart: range.start,
+                    matchLength: range.length,
+                })
+            }
+        }
+    }
+
     Component {
         id: omniboxPopupComponent
 
@@ -3149,14 +3247,69 @@ ApplicationWindow {
                         field.forceActiveFocus()
                     }
                     return
-                }
+                 }
+ 
+                 const field = root.activeAddressField()
+                 if (item.kind === "action") {
+                     const action = item.action || ""
+                     const url = item.url || ""
 
-                const field = root.activeAddressField()
-                if (item.kind === "tab") {
-                    browser.activateTabById(item.tabId)
-                    if (field) {
-                        field.focus = false
-                    }
+                     if (action === "copy-url") {
+                         commands.invoke("copy-text", { text: url })
+                         return
+                     }
+
+                     if (!url || url.length === 0) {
+                         return
+                     }
+
+                     if (action === "open-new-workspace") {
+                         const workspaces = browser.workspaces
+                         if (!workspaces) {
+                             return
+                         }
+                         const nextNumber = workspaces.count() + 1
+                         const wsIndex = workspaces.addWorkspace("Workspace " + nextNumber)
+                         workspaces.activeIndex = wsIndex
+                         browser.newTab(url)
+                         if (field) {
+                             field.focus = false
+                         }
+                         return
+                     }
+
+                     if (action === "open-split-right") {
+                         const leftTabId = root.tabIdForActiveIndex()
+                         const idx = browser.newTab(url)
+                         const model = browser.tabs
+                         const rightTabId = (idx >= 0 && model) ? model.tabIdAt(idx) : 0
+                         if (rightTabId <= 0) {
+                             return
+                         }
+
+                         if (!splitView.enabled) {
+                             splitView.paneCount = 2
+                             splitView.setTabIdForPane(0, leftTabId > 0 ? leftTabId : rightTabId)
+                             splitView.enabled = true
+                         } else if (splitView.paneCount < 2) {
+                             splitView.paneCount = 2
+                         }
+
+                         splitView.setTabIdForPane(1, rightTabId)
+                         splitView.focusedPane = 1
+                         if (field) {
+                             field.focus = false
+                         }
+                         return
+                     }
+
+                     return
+                 }
+                 if (item.kind === "tab") {
+                     browser.activateTabById(item.tabId)
+                     if (field) {
+                         field.focus = false
+                     }
                     return
                 }
 
@@ -3228,21 +3381,24 @@ ApplicationWindow {
                                 color: Qt.rgba(0, 0, 0, 0.06)
                                 visible: !(kind === "tab" && faviconUrl && faviconUrl.toString().length > 0)
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: kind === "command"
-                                          ? ">"
-                                          : (kind === "tab"
-                                                 ? "T"
-                                                 : (kind === "workspace"
-                                                        ? "W"
-                                                        : (kind === "bookmark"
-                                                               ? "\u2605"
-                                                               : (kind === "history" ? "H" : (kind === "search" ? "S" : "U")))))
-                                    opacity: 0.7
-                                    font.pixelSize: 10
-                                }
-                            }
+                                     Text {
+                                         anchors.centerIn: parent
+                                         text: kind === "command"
+                                               ? ">"
+                                          : (kind === "action"
+                                                 ? "A"
+                                                 : (kind === "tab"
+                                                  ? "T"
+                                                  : (kind === "workspace"
+                                                         ? "W"
+                                                         : (kind === "bookmark"
+                                                                ? "\u2605"
+                                                                : (kind === "history" ? "H" : (kind === "search" ? "S" : "U")))))
+                                                )
+                                         opacity: 0.7
+                                         font.pixelSize: 10
+                                     }
+                                 }
 
                             Image {
                                 anchors.fill: parent

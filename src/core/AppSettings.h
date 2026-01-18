@@ -15,6 +15,10 @@ class AppSettings : public QObject
   Q_PROPERTY(bool useSingleToolbar READ useSingleToolbar WRITE setUseSingleToolbar NOTIFY useSingleToolbarChanged)
   Q_PROPERTY(bool addressBarVisible READ addressBarVisible WRITE setAddressBarVisible NOTIFY addressBarVisibleChanged)
   Q_PROPERTY(
+    bool webSuggestionsEnabled READ webSuggestionsEnabled WRITE setWebSuggestionsEnabled NOTIFY webSuggestionsEnabledChanged)
+  Q_PROPERTY(
+    bool omniboxActionsEnabled READ omniboxActionsEnabled WRITE setOmniboxActionsEnabled NOTIFY omniboxActionsEnabledChanged)
+  Q_PROPERTY(
     bool essentialCloseResets READ essentialCloseResets WRITE setEssentialCloseResets NOTIFY essentialCloseResetsChanged)
   Q_PROPERTY(bool compactMode READ compactMode WRITE setCompactMode NOTIFY compactModeChanged)
   Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
@@ -59,6 +63,12 @@ public:
 
   bool addressBarVisible() const;
   void setAddressBarVisible(bool visible);
+
+  bool webSuggestionsEnabled() const;
+  void setWebSuggestionsEnabled(bool enabled);
+
+  bool omniboxActionsEnabled() const;
+  void setOmniboxActionsEnabled(bool enabled);
 
   bool essentialCloseResets() const;
   void setEssentialCloseResets(bool enabled);
@@ -120,6 +130,8 @@ signals:
   void sidebarOnRightChanged();
   void useSingleToolbarChanged();
   void addressBarVisibleChanged();
+  void webSuggestionsEnabledChanged();
+  void omniboxActionsEnabledChanged();
   void essentialCloseResetsChanged();
   void compactModeChanged();
   void reduceMotionChanged();
@@ -148,6 +160,8 @@ private:
   bool m_sidebarOnRight = false;
   bool m_useSingleToolbar = false;
   bool m_addressBarVisible = true;
+  bool m_webSuggestionsEnabled = false;
+  bool m_omniboxActionsEnabled = true;
   bool m_essentialCloseResets = false;
   bool m_compactMode = false;
   bool m_reduceMotion = false;

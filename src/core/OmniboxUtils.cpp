@@ -1,6 +1,15 @@
 #include "OmniboxUtils.h"
 
 #include <QAbstractItemModel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QSet>
+#include <QUrlQuery>
 
 #include "TabModel.h"
 #include "WorkspaceModel.h"
@@ -67,11 +76,312 @@ struct ModelHit
   int matchStart = -1;
   int matchLength = 0;
 };
+
+QStringList parseOpenSuggestionsPayload(const QByteArray& payload)
+{
+  QJsonParseError parseError;
+  const QJsonDocument doc = QJsonDocument::fromJson(payload, &parseError);
+  if (parseError.error != QJsonParseError::NoError) {
+    return {};
+  }
+
+  // OpenSearch Suggestions: [query, [suggestion, ...], ...]
+  if (doc.isArray()) {
+    const QJsonArray root = doc.array();
+    if (root.size() >= 2 && root.at(1).isArray()) {
+      const QJsonArray suggestions = root.at(1).toArray();
+      QStringList out;
+      out.reserve(suggestions.size());
+      for (const QJsonValue& v : suggestions) {
+        if (!v.isString()) {
+          continue;
+        }
+        const QString s = v.toString().trimmed();
+        if (!s.isEmpty()) {
+          out.push_back(s);
+        }
+      }
+      return out;
+    }
+
+    // DuckDuckGo: [{"phrase":"..."}]
+    bool looksLikeDdg = !root.isEmpty();
+    QStringList out;
+    out.reserve(root.size());
+    for (const QJsonValue& v : root) {
+      if (!v.isObject()) {
+        looksLikeDdg = false;
+        break;
+      }
+      const QString s = v.toObject().value(QStringLiteral("phrase")).toString().trimmed();
+      if (!s.isEmpty()) {
+        out.push_back(s);
+      }
+    }
+    return looksLikeDdg ? out : QStringList {};
+  }
+
+  return {};
+}
+
+class BingOpenSuggestionsProvider final : public WebSuggestionsProvider
+{
+public:
+  explicit BingOpenSuggestionsProvider(QObject* parent = nullptr)
+    : WebSuggestionsProvider(parent)
+  {
+  }
+
+  void requestSuggestions(const QString& query) override
+  {
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+      emit suggestionsResponseReceived(trimmed, QByteArray());
+      return;
+    }
+
+    if (m_pending) {
+      m_pending->abort();
+      m_pending->deleteLater();
+      m_pending = nullptr;
+    }
+
+    QUrl url(QStringLiteral("https://api.bing.com/osjson.aspx"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("query"), trimmed);
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setTransferTimeout(1500);
+
+    m_pending = m_network.get(req);
+    connect(m_pending, &QNetworkReply::finished, this, [this, trimmed] {
+      QNetworkReply* reply = m_pending;
+      m_pending = nullptr;
+      if (!reply) {
+        return;
+      }
+
+      const QByteArray payload = reply->readAll();
+      const QNetworkReply::NetworkError error = reply->error();
+      const QString errorText = reply->errorString();
+      reply->deleteLater();
+
+      if (error != QNetworkReply::NoError) {
+        emit suggestionsRequestFailed(trimmed, errorText);
+        return;
+      }
+
+      emit suggestionsResponseReceived(trimmed, payload);
+    });
+  }
+
+private:
+  QNetworkAccessManager m_network;
+  QPointer<QNetworkReply> m_pending;
+};
 }
 
 OmniboxUtils::OmniboxUtils(QObject* parent)
   : QObject(parent)
 {
+  m_webSuggestionsDebounce.setSingleShot(true);
+  m_webSuggestionsDebounce.setInterval(150);
+  connect(&m_webSuggestionsDebounce, &QTimer::timeout, this, &OmniboxUtils::fireWebSuggestionsRequest);
+
+  setWebSuggestionsProvider(new BingOpenSuggestionsProvider(this));
+}
+
+bool OmniboxUtils::webSuggestionsEnabled() const
+{
+  return m_webSuggestionsEnabled;
+}
+
+void OmniboxUtils::setWebSuggestionsEnabled(bool enabled)
+{
+  if (m_webSuggestionsEnabled == enabled) {
+    return;
+  }
+
+  m_webSuggestionsEnabled = enabled;
+  emit webSuggestionsEnabledChanged();
+
+  if (!enabled) {
+    m_webSuggestionsDebounce.stop();
+    m_pendingWebSuggestionsQuery.clear();
+    m_inflightWebSuggestionsQuery.clear();
+  }
+}
+
+void OmniboxUtils::requestWebSuggestions(const QString& query, int limit)
+{
+  const QString trimmed = query.trimmed();
+  if (trimmed.isEmpty() || limit <= 0) {
+    m_webSuggestionsDebounce.stop();
+    m_pendingWebSuggestionsQuery.clear();
+    m_pendingWebSuggestionsLimit = 0;
+    return;
+  }
+
+  m_pendingWebSuggestionsQuery = trimmed;
+  m_pendingWebSuggestionsLimit = limit;
+
+  if (!m_webSuggestionsEnabled || !m_webSuggestionsProvider) {
+    return;
+  }
+
+  m_webSuggestionsDebounce.start();
+}
+
+void OmniboxUtils::setWebSuggestionsProvider(WebSuggestionsProvider* provider)
+{
+  if (provider == m_webSuggestionsProvider) {
+    return;
+  }
+
+  if (m_webSuggestionsProvider) {
+    disconnect(m_webSuggestionsProvider, nullptr, this, nullptr);
+  }
+
+  m_webSuggestionsProvider = provider;
+
+  if (m_webSuggestionsProvider) {
+    connect(
+      m_webSuggestionsProvider,
+      &WebSuggestionsProvider::suggestionsResponseReceived,
+      this,
+      &OmniboxUtils::handleWebSuggestionsResponse);
+    connect(
+      m_webSuggestionsProvider,
+      &WebSuggestionsProvider::suggestionsRequestFailed,
+      this,
+      &OmniboxUtils::handleWebSuggestionsError);
+  }
+}
+
+WebSuggestionsProvider* OmniboxUtils::webSuggestionsProvider() const
+{
+  return m_webSuggestionsProvider;
+}
+
+void OmniboxUtils::emitWebSuggestionsForQuery(const QString& query, const QVariantList& suggestions)
+{
+  if (!m_webSuggestionsEnabled) {
+    return;
+  }
+  emit webSuggestionsReady(query, suggestions);
+}
+
+void OmniboxUtils::fireWebSuggestionsRequest()
+{
+  if (!m_webSuggestionsEnabled || !m_webSuggestionsProvider) {
+    return;
+  }
+
+  const QString query = m_pendingWebSuggestionsQuery.trimmed();
+  if (query.isEmpty()) {
+    return;
+  }
+
+  m_inflightWebSuggestionsQuery = query;
+  m_inflightWebSuggestionsLimit = m_pendingWebSuggestionsLimit;
+  m_webSuggestionsProvider->requestSuggestions(query);
+}
+
+void OmniboxUtils::handleWebSuggestionsResponse(const QString& query, const QByteArray& payload)
+{
+  if (!m_webSuggestionsEnabled) {
+    return;
+  }
+
+  const QString trimmed = query.trimmed();
+  if (trimmed.isEmpty() || trimmed != m_inflightWebSuggestionsQuery) {
+    return;
+  }
+
+  const int limit = m_inflightWebSuggestionsLimit;
+  if (limit <= 0) {
+    emitWebSuggestionsForQuery(trimmed, {});
+    return;
+  }
+
+  const QStringList parsed = parseOpenSuggestionsPayload(payload);
+  if (parsed.isEmpty()) {
+    emitWebSuggestionsForQuery(trimmed, {});
+    return;
+  }
+
+  struct Hit
+  {
+    int score = -1;
+    int order = 0;
+    QString text;
+  };
+
+  std::vector<Hit> hits;
+  hits.reserve(static_cast<size_t>(parsed.size()));
+
+  QSet<QString> seen;
+  for (int i = 0; i < parsed.size(); ++i) {
+    const QString text = parsed.at(i).trimmed();
+    if (text.isEmpty()) {
+      continue;
+    }
+
+    const QString key = text.toLower();
+    if (seen.contains(key)) {
+      continue;
+    }
+    seen.insert(key);
+
+    if (text.compare(trimmed, Qt::CaseInsensitive) == 0) {
+      continue;
+    }
+
+    const int score = fuzzyScore(trimmed, text);
+    if (score < 0) {
+      continue;
+    }
+
+    Hit hit;
+    hit.score = score;
+    hit.order = i;
+    hit.text = text;
+    hits.push_back(std::move(hit));
+  }
+
+  std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) {
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    return a.order < b.order;
+  });
+
+  QVariantList out;
+  out.reserve(std::min(limit, static_cast<int>(hits.size())));
+  for (const auto& hit : hits) {
+    if (out.size() >= limit) {
+      break;
+    }
+    out.append(hit.text);
+  }
+
+  emitWebSuggestionsForQuery(trimmed, out);
+}
+
+void OmniboxUtils::handleWebSuggestionsError(const QString& query, const QString&)
+{
+  if (!m_webSuggestionsEnabled) {
+    return;
+  }
+
+  const QString trimmed = query.trimmed();
+  if (trimmed.isEmpty() || trimmed != m_inflightWebSuggestionsQuery) {
+    return;
+  }
+
+  emitWebSuggestionsForQuery(trimmed, {});
 }
 
 int OmniboxUtils::fuzzyScore(const QString& query, const QString& target) const

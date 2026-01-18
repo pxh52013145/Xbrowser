@@ -40,13 +40,15 @@ private slots:
     QVERIFY(doc.isObject());
     const QJsonObject obj = doc.object();
 
-    QCOMPARE(obj.value("version").toInt(), 6);
+    QCOMPARE(obj.value("version").toInt(), 8);
     QCOMPARE(obj.value("lastSeenAppVersion").toString(), QStringLiteral("1.2.3"));
     QCOMPARE(obj.value("onboardingSeen").toBool(), true);
     QCOMPARE(obj.value("firstRunCompleted").toBool(), true);
     QCOMPARE(obj.value("showMenuBar").toBool(), true);
     QCOMPARE(obj.value("sidebarOnRight").toBool(), true);
     QCOMPARE(obj.value("useSingleToolbar").toBool(), true);
+    QCOMPARE(obj.value("webSuggestionsEnabled").toBool(), false);
+    QCOMPARE(obj.value("omniboxActionsEnabled").toBool(), true);
     QCOMPARE(obj.value("closeTabOnBackNoHistory").toBool(), true);
     QVERIFY(qAbs(obj.value("defaultZoom").toDouble() - 1.1) < 0.0001);
     QCOMPARE(obj.value("rememberZoomPerSite").toBool(), true);
