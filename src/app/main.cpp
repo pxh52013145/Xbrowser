@@ -556,6 +556,66 @@ int main(int argc, char* argv[])
       return;
     }
 
+    if (id == "open-external-url") {
+      QUrl url;
+
+      const QString explicitUrl = args.value("url").toString().trimmed();
+      if (!explicitUrl.isEmpty()) {
+        url = QUrl(explicitUrl);
+      } else {
+        TabModel* model = browser.tabs();
+        if (!model) {
+          return;
+        }
+
+        int index = model->activeIndex();
+        const int tabId = args.value("tabId").toInt();
+        if (tabId > 0) {
+          const int resolved = model->indexOfTabId(tabId);
+          if (resolved >= 0) {
+            index = resolved;
+          }
+        }
+        if (index < 0) {
+          return;
+        }
+
+        url = model->urlAt(index);
+      }
+
+      if (!url.isValid()) {
+        return;
+      }
+
+      if (QDesktopServices::openUrl(url)) {
+        return;
+      }
+
+      QGuiApplication::clipboard()->setText(url.toString(QUrl::FullyEncoded));
+      toast.showToast(QStringLiteral("Failed to open default browser (copied URL)"));
+      return;
+    }
+
+    if (id == "open-external-link") {
+      const QString urlText = args.value("url").toString().trimmed();
+      if (urlText.isEmpty()) {
+        return;
+      }
+
+      const QUrl url(urlText);
+      if (!url.isValid()) {
+        return;
+      }
+
+      if (QDesktopServices::openUrl(url)) {
+        return;
+      }
+
+      QGuiApplication::clipboard()->setText(url.toString(QUrl::FullyEncoded));
+      toast.showToast(QStringLiteral("Failed to open default browser (copied URL)"));
+      return;
+    }
+
     if (id == "copy-title") {
       TabModel* model = browser.tabs();
       if (!model) {

@@ -249,6 +249,7 @@ ApplicationWindow {
                 }
             }
             MenuSeparator { }
+            MenuItem { text: "Open in Default Browser"; onTriggered: commands.invoke("open-external-url", { tabId: root.focusedTabId }) }
             MenuItem { text: "Share URL"; onTriggered: commands.invoke("share-url", { tabId: root.focusedTabId }) }
             MenuSeparator { }
             MenuItem { text: "Print"; onTriggered: commands.invoke("open-print") }
@@ -1075,6 +1076,11 @@ ApplicationWindow {
         items.push({ action: "back", text: "Back", enabled: view.canGoBack })
         items.push({ action: "forward", text: "Forward", enabled: view.canGoForward })
         items.push({ action: "reload", text: "Reload", enabled: true })
+        items.push({
+            action: "open-external-page",
+            text: "Open in default browser",
+            enabled: view.currentUrl && view.currentUrl.toString && view.currentUrl.toString().length > 0 && view.currentUrl.toString() !== "about:blank"
+        })
 
         const link = info.linkUri ? String(info.linkUri) : ""
         const src = info.sourceUri ? String(info.sourceUri) : ""
@@ -1084,6 +1090,7 @@ ApplicationWindow {
         if (link.length > 0) {
             items.push({ action: "open-link-new-tab", text: "Open link in new tab", enabled: true })
             items.push({ action: "open-link-split", text: "Open link in split view", enabled: true })
+            items.push({ action: "open-link-external", text: "Open link in default browser", enabled: true })
             items.push({ action: "copy-link", text: "Copy link address", enabled: true })
         }
         if (src.length > 0 && (!link || src !== link)) {
@@ -1115,10 +1122,14 @@ ApplicationWindow {
             view.goForward()
         } else if (action === "reload" && view) {
             view.reload()
+        } else if (action === "open-external-page") {
+            commands.invoke("open-external-url", { tabId: webContextMenuTabId })
         } else if (action === "open-link-new-tab" && link.length > 0) {
             commands.invoke("new-tab", { url: link })
         } else if (action === "open-link-split" && link.length > 0) {
             splitView.openUrlInNewPane(link)
+        } else if (action === "open-link-external" && link.length > 0) {
+            commands.invoke("open-external-link", { url: link })
         } else if (action === "copy-link" && link.length > 0) {
             commands.invoke("copy-text", { text: link })
         } else if (action === "open-source-new-tab" && src.length > 0) {
