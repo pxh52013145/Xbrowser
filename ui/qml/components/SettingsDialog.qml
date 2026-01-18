@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt.labs.platform
+import Qt.labs.platform as Platform
 
 Item {
     id: root
@@ -55,10 +55,10 @@ Item {
         toast.showToast(err.length > 0 ? ("Import failed: " + err) : "Import failed")
     }
 
-    FileDialog {
+    Platform.FileDialog {
         id: importBookmarksDialog
         title: "Import Bookmarks"
-        fileMode: FileDialog.OpenFile
+        fileMode: Platform.FileDialog.OpenFile
         nameFilters: ["Bookmarks HTML (*.html *.htm)", "All files (*)"]
         onAccepted: {
             root.pendingImportPath = root.dialogPath(importBookmarksDialog.file)
@@ -88,10 +88,10 @@ Item {
         }
     }
 
-    FileDialog {
+    Platform.FileDialog {
         id: exportBookmarksDialog
         title: "Export Bookmarks"
-        fileMode: FileDialog.SaveFile
+        fileMode: Platform.FileDialog.SaveFile
         nameFilters: ["Bookmarks HTML (*.html)", "All files (*)"]
         onAccepted: {
             const path = root.dialogPath(exportBookmarksDialog.file)

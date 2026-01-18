@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt.labs.platform
+import Qt.labs.platform as Platform
 
 Item {
     id: root
@@ -27,10 +27,10 @@ Item {
         }
     }
 
-    FileDialog {
+    Platform.FileDialog {
         id: saveDialog
         title: "Save as PDF"
-        fileMode: FileDialog.SaveFile
+        fileMode: Platform.FileDialog.SaveFile
         nameFilters: ["PDF files (*.pdf)"]
         onAccepted: {
             const url = saveDialog.file
@@ -134,4 +134,3 @@ Item {
 
     Keys.onEscapePressed: root.closeRequested()
 }
-
