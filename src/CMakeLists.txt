@@ -2,6 +2,7 @@ qt_add_executable(xbrowser
   WIN32
   app/main.cpp
   core/AppPaths.cpp
+  core/ProfileLock.cpp
   core/AppSettings.cpp
   core/BrowserController.cpp
   core/BookmarksFilterModel.cpp

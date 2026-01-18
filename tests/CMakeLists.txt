@@ -136,3 +136,8 @@ xbrowser_add_test(xbrowser_test_webpanels
 xbrowser_add_test(xbrowser_test_omnibox_utils
   TestOmniboxUtils.cpp
 )
+
+xbrowser_add_test(xbrowser_test_profile_lock
+  TestProfileLock.cpp
+  ../src/core/ProfileLock.cpp
+)

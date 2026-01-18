@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "../core/AppPaths.h"
+#include "../core/ProfileLock.h"
 #include "../core/BrowserController.h"
 #include "../core/BookmarksFilterModel.h"
 #include "../core/BookmarksStore.h"
@@ -317,6 +318,20 @@ int main(int argc, char* argv[])
     QDir().mkpath(profileDir);
     qputenv("XBROWSER_DATA_DIR", QDir::toNativeSeparators(QDir(profileDir).absolutePath()).toUtf8());
     qputenv("XBROWSER_PROFILE", launchOptions.profileId.toUtf8());
+  }
+
+  std::unique_ptr<xbrowser::ProfileLock> profileLock;
+  if (!launchOptions.incognito) {
+    QString lockError;
+    const QString dataDir = xbrowser::appDataRoot();
+    profileLock = xbrowser::tryAcquireProfileLock(dataDir, &lockError);
+    if (!profileLock) {
+      const QString message =
+        QStringLiteral("Another XBrowser instance is already using this profile.\n\n%1\n\nTip: start a separate instance with --profile <id> or --incognito.")
+          .arg(lockError.isEmpty() ? QDir::toNativeSeparators(dataDir) : lockError);
+      showFatalMessage(message);
+      return 1;
+    }
   }
 
   installLogging();
