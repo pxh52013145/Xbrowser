@@ -70,6 +70,7 @@ public:
   Q_INVOKABLE void addScriptOnDocumentCreated(const QString& script);
   Q_INVOKABLE void executeScript(const QString& script);
   Q_INVOKABLE void postWebMessageAsJson(const QString& json);
+  Q_INVOKABLE void setUserCss(const QString& css);
   Q_INVOKABLE void respondToPermissionRequest(int requestId, int state, bool remember);
   Q_INVOKABLE void clearBrowsingData(int dataKinds, qint64 fromMs, qint64 toMs);
 
@@ -115,6 +116,9 @@ private:
   void updateNavigationState();
   void updateAudioState();
   void flushPendingScripts();
+  void ensureUserCssBootstrapScript();
+  bool handleInternalWebMessage(const QString& json);
+  void postUserCssMessage();
   void handleDownloadStateChanged(int subscriptionId, ICoreWebView2DownloadOperation* download);
   void handleDownloadBytesReceivedChanged(int subscriptionId, ICoreWebView2DownloadOperation* download);
   void setIsLoading(bool loading);
@@ -164,6 +168,8 @@ private:
   bool m_capturePreviewInProgress = false;
   QUrl m_pendingNavigate;
   QStringList m_pendingScripts;
+  QString m_userCss;
+  bool m_userCssBootstrapInstalled = false;
 
   struct DownloadSubscription
   {

@@ -77,39 +77,8 @@ ApplicationWindow {
     readonly property int uiSpacing: theme.spacing
 
     property string glanceScript: ""
-    readonly property string modsBootstrapScript: `
-(() => {
-  if (window.__xbrowserModsInstalled) return;
-  window.__xbrowserModsInstalled = true;
-
-  const styleId = "__xbrowserModsStyle";
-  function ensureStyle() {
-    let el = document.getElementById(styleId);
-    if (el) return el;
-    el = document.createElement("style");
-    el.id = styleId;
-    (document.head || document.documentElement).appendChild(el);
-    return el;
-  }
-
-  const styleEl = ensureStyle();
-  function apply(css) {
-    styleEl.textContent = css || "";
-  }
-
-  try {
-    const wv = window.chrome && window.chrome.webview;
-    if (wv && wv.addEventListener) {
-      wv.addEventListener("message", (ev) => {
-        const data = ev && ev.data;
-        if (!data || data.type !== "xbrowser-mods-css") return;
-        apply(String(data.css || ""));
-      });
-      wv.postMessage({ type: "xbrowser-mods-ready" });
-    }
-  } catch (_) {}
-})();
-`
+    property var glanceView: null
+    property var extensionPopupView: null
     property string omniboxQuery: ""
     property bool suppressNextOmniboxUpdate: false
 
@@ -950,18 +919,29 @@ ApplicationWindow {
 
     function pushModsCss(targetView) {
         const css = root.modsModel && root.modsModel.combinedCss ? String(root.modsModel.combinedCss) : ""
-        const payload = JSON.stringify({ type: "xbrowser-mods-css", css: css })
 
-        if (targetView) {
-            targetView.postWebMessageAsJson(payload)
+        if (targetView && targetView.setUserCss) {
+            targetView.setUserCss(css)
             return
         }
 
         for (const key in tabViews.byId) {
             const view = tabViews.byId[key]
-            if (view) {
-                view.postWebMessageAsJson(payload)
+            if (view && view.setUserCss) {
+                view.setUserCss(css)
             }
+        }
+
+        if (webPanelWeb && webPanelWeb.setUserCss) {
+            webPanelWeb.setUserCss(css)
+        }
+
+        if (root.glanceView && root.glanceView.setUserCss) {
+            root.glanceView.setUserCss(css)
+        }
+
+        if (root.extensionPopupView && root.extensionPopupView.setUserCss) {
+            root.extensionPopupView.setUserCss(css)
         }
     }
 
@@ -970,11 +950,6 @@ ApplicationWindow {
         try {
             msg = JSON.parse(json)
         } catch (e) {
-            return
-        }
-
-        if (msg && msg.type === "xbrowser-mods-ready") {
-            root.pushModsCss(senderView)
             return
         }
 
@@ -2271,8 +2246,16 @@ ApplicationWindow {
                     Layout.fillHeight: true
 
                     Component.onCompleted: {
+                        root.extensionPopupView = extPopupWeb
+                        root.pushModsCss(extPopupWeb)
                         if (root.extensionPopupUrl && root.extensionPopupUrl.length > 0) {
                             navigate(root.extensionPopupUrl)
+                        }
+                    }
+
+                    Component.onDestruction: {
+                        if (root.extensionPopupView === extPopupWeb) {
+                            root.extensionPopupView = null
                         }
                     }
                 }
@@ -2468,10 +2451,15 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Component.onCompleted: {
-                            if (root.modsBootstrapScript && root.modsBootstrapScript.length > 0) {
-                                addScriptOnDocumentCreated(root.modsBootstrapScript)
-                            }
+                            root.glanceView = glanceWeb
+                            root.pushModsCss(glanceWeb)
                             navigate(root.glanceUrl)
+                        }
+
+                        Component.onDestruction: {
+                            if (root.glanceView === glanceWeb) {
+                                root.glanceView = null
+                            }
                         }
 
                         onWebMessageReceived: (json) => root.handleWebMessage(0, json, glanceWeb)
@@ -5322,9 +5310,7 @@ ApplicationWindow {
                     height: paneRect.height
 
                     Component.onCompleted: {
-                        if (root.modsBootstrapScript && root.modsBootstrapScript.length > 0) {
-                            addScriptOnDocumentCreated(root.modsBootstrapScript)
-                        }
+                        root.pushModsCss(tabWeb)
                         if (root.glanceScript && root.glanceScript.length > 0) {
                             addScriptOnDocumentCreated(root.glanceScript)
                         }
@@ -5925,6 +5911,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
 
                     Component.onCompleted: {
+                        root.pushModsCss(webPanelWeb)
                         if (root.webPanelUrl && root.webPanelUrl.toString().length > 0 && root.webPanelUrl.toString() !== "about:blank") {
                             navigate(root.webPanelUrl)
                         }

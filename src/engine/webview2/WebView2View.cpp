@@ -14,7 +14,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMetaObject>
+#include <QPointer>
 #include <QQuickWindow>
 #include <QSaveFile>
 #include <QUrl>
@@ -95,6 +98,40 @@ QString webView2UserDataDir()
 {
   return QDir(xbrowser::appDataRoot()).filePath("webview2");
 }
+
+constexpr const char* kUserCssBootstrapScript = R"JS(
+(() => {
+  if (window.__xbrowserModsInstalled) return;
+  window.__xbrowserModsInstalled = true;
+
+  const styleId = "__xbrowserModsStyle";
+  function ensureStyle() {
+    let el = document.getElementById(styleId);
+    if (el) return el;
+    el = document.createElement("style");
+    el.id = styleId;
+    (document.head || document.documentElement).appendChild(el);
+    return el;
+  }
+
+  const styleEl = ensureStyle();
+  function apply(css) {
+    styleEl.textContent = css || "";
+  }
+
+  try {
+    const wv = window.chrome && window.chrome.webview;
+    if (wv && wv.addEventListener) {
+      wv.addEventListener("message", (ev) => {
+        const data = ev && ev.data;
+        if (!data || data.type !== "xbrowser-mods-css") return;
+        apply(String(data.css || ""));
+      });
+      wv.postMessage({ type: "xbrowser-mods-ready" });
+    }
+  } catch (_) {}
+})();
+)JS";
 
 constexpr qreal kMinZoomFactor = 0.25;
 constexpr qreal kMaxZoomFactor = 5.0;
@@ -842,6 +879,17 @@ void WebView2View::postWebMessageAsJson(const QString& json)
   m_webView->PostWebMessageAsJson(toWide(trimmed).c_str());
 }
 
+void WebView2View::setUserCss(const QString& css)
+{
+  ensureUserCssBootstrapScript();
+  if (m_userCss == css) {
+    return;
+  }
+
+  m_userCss = css;
+  postUserCssMessage();
+}
+
 void WebView2View::respondToPermissionRequest(int requestId, int state, bool remember)
 {
   if (requestId <= 0) {
@@ -1242,7 +1290,10 @@ void WebView2View::startControllerCreation(ICoreWebView2Environment* env)
 
               LPWSTR json = nullptr;
               if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) {
-                emit webMessageReceived(QString::fromWCharArray(json));
+                const QString message = QString::fromWCharArray(json);
+                if (!handleInternalWebMessage(message)) {
+                  emit webMessageReceived(message);
+                }
                 CoTaskMemFree(json);
               }
 
@@ -1448,6 +1499,52 @@ void WebView2View::flushPendingScripts()
   for (const QString& script : scripts) {
     addScriptOnDocumentCreated(script);
   }
+}
+
+void WebView2View::ensureUserCssBootstrapScript()
+{
+  if (m_userCssBootstrapInstalled) {
+    return;
+  }
+
+  addScriptOnDocumentCreated(QString::fromUtf8(kUserCssBootstrapScript));
+  m_userCssBootstrapInstalled = true;
+}
+
+bool WebView2View::handleInternalWebMessage(const QString& json)
+{
+  if (!m_webView) {
+    return false;
+  }
+
+  QJsonParseError error;
+  const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &error);
+  if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+    return false;
+  }
+
+  const QJsonObject obj = doc.object();
+  const QString type = obj.value(QStringLiteral("type")).toString();
+  if (type == QStringLiteral("xbrowser-mods-ready")) {
+    postUserCssMessage();
+    return true;
+  }
+
+  return false;
+}
+
+void WebView2View::postUserCssMessage()
+{
+  if (!m_webView) {
+    return;
+  }
+
+  QJsonObject obj;
+  obj.insert(QStringLiteral("type"), QStringLiteral("xbrowser-mods-css"));
+  obj.insert(QStringLiteral("css"), m_userCss);
+
+  const QString payload = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+  m_webView->PostWebMessageAsJson(toWide(payload).c_str());
 }
 
 void WebView2View::handleDownloadStateChanged(int subscriptionId, ICoreWebView2DownloadOperation* download)
