@@ -1,6 +1,58 @@
 #include "TabModel.h"
 
+#include "AppPaths.h"
+
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QUrlQuery>
+
+#include <algorithm>
+
+namespace
+{
+bool isUnderDataRoot(const QString& absoluteFilePath)
+{
+  if (absoluteFilePath.trimmed().isEmpty()) {
+    return false;
+  }
+
+  const QString rootPath = QDir::fromNativeSeparators(QDir(xbrowser::appDataRoot()).absolutePath());
+  QString root = QDir::cleanPath(rootPath);
+  if (!root.endsWith('/')) {
+    root += '/';
+  }
+
+  const QString candidate =
+    QDir::cleanPath(QDir::fromNativeSeparators(QFileInfo(absoluteFilePath).absoluteFilePath()));
+  return candidate.startsWith(root, Qt::CaseInsensitive);
+}
+
+void removeFileIfSafe(const QString& path)
+{
+  if (path.trimmed().isEmpty()) {
+    return;
+  }
+  if (!isUnderDataRoot(path)) {
+    return;
+  }
+  QFile::remove(path);
+}
+
+QUrl thumbnailUrlFor(const QString& path, int version)
+{
+  if (path.trimmed().isEmpty()) {
+    return {};
+  }
+
+  QUrl url = QUrl::fromLocalFile(path);
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("t"), QString::number(qMax(0, version)));
+  url.setQuery(query);
+  return url;
+}
+}
 
 TabModel::TabModel(QObject* parent)
   : QAbstractListModel(parent)
@@ -44,6 +96,8 @@ QVariant TabModel::data(const QModelIndex& index, int role) const
       return tab.groupId;
     case FaviconUrlRole:
       return tab.faviconUrl;
+    case ThumbnailUrlRole:
+      return thumbnailUrlFor(tab.thumbnailPath, tab.thumbnailVersion);
     case IsLoadingRole:
       return tab.isLoading;
     case IsAudioPlayingRole:
@@ -70,6 +124,7 @@ QHash<int, QByteArray> TabModel::roleNames() const
     {IsEssentialRole, "isEssential"},
     {GroupIdRole, "groupId"},
     {FaviconUrlRole, "faviconUrl"},
+    {ThumbnailUrlRole, "thumbnailUrl"},
     {IsLoadingRole, "isLoading"},
     {IsAudioPlayingRole, "isAudioPlaying"},
     {IsMutedRole, "isMuted"},
@@ -174,6 +229,12 @@ void TabModel::clear()
   const bool hadSelection = !m_selectedTabIds.isEmpty();
 
   beginResetModel();
+  for (const auto& tab : m_tabs) {
+    removeFileIfSafe(tab.thumbnailPath);
+  }
+  for (const auto& tab : m_closedTabs) {
+    removeFileIfSafe(tab.thumbnailPath);
+  }
   m_tabs.clear();
   m_closedTabs.clear();
   m_selectedTabIds.clear();
@@ -467,6 +528,65 @@ void TabModel::setFaviconUrlAt(int index, const QUrl& url)
   emit dataChanged(this->index(index), this->index(index), {FaviconUrlRole});
 }
 
+QUrl TabModel::thumbnailUrlAt(int index) const
+{
+  if (index < 0 || index >= m_tabs.size()) {
+    return {};
+  }
+
+  const auto& tab = m_tabs[index];
+  return thumbnailUrlFor(tab.thumbnailPath, tab.thumbnailVersion);
+}
+
+void TabModel::setThumbnailPathById(int tabId, const QString& filePath)
+{
+  if (tabId <= 0) {
+    return;
+  }
+
+  const int index = indexOfTabId(tabId);
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  const QString trimmed = filePath.trimmed();
+
+  if (!trimmed.isEmpty() && tab.thumbnailPath != trimmed) {
+    removeFileIfSafe(tab.thumbnailPath);
+    tab.thumbnailPath = trimmed;
+  } else if (trimmed.isEmpty() && !tab.thumbnailPath.isEmpty()) {
+    removeFileIfSafe(tab.thumbnailPath);
+    tab.thumbnailPath.clear();
+  }
+
+  tab.thumbnailVersion++;
+  tab.thumbnailLastUsedMs = QDateTime::currentMSecsSinceEpoch();
+
+  enforceThumbnailLimit(tabId);
+  emit dataChanged(this->index(index), this->index(index), {ThumbnailUrlRole});
+}
+
+void TabModel::markThumbnailUsedById(int tabId)
+{
+  if (tabId <= 0) {
+    return;
+  }
+
+  const int index = indexOfTabId(tabId);
+  if (index < 0 || index >= m_tabs.size()) {
+    return;
+  }
+
+  auto& tab = m_tabs[index];
+  if (tab.thumbnailPath.isEmpty()) {
+    return;
+  }
+
+  tab.thumbnailLastUsedMs = QDateTime::currentMSecsSinceEpoch();
+  enforceThumbnailLimit(tabId);
+}
+
 bool TabModel::isLoadingAt(int index) const
 {
   if (index < 0 || index >= m_tabs.size()) {
@@ -639,6 +759,8 @@ void TabModel::removeTabInternal(int index, bool recordClosed)
     return;
   }
 
+  removeFileIfSafe(m_tabs[index].thumbnailPath);
+
   const int removedTabId = m_tabs[index].id;
   const bool selectionWasChanged = m_selectedTabIds.contains(removedTabId);
   m_selectedTabIds.remove(removedTabId);
@@ -675,5 +797,52 @@ void TabModel::updateActiveIndexAfterClose(int closedIndex)
 
   if (closedIndex < m_activeIndex) {
     setActiveIndex(m_activeIndex - 1);
+  }
+}
+
+void TabModel::enforceThumbnailLimit(int keepTabId)
+{
+  QVector<int> withThumb;
+  withThumb.reserve(m_tabs.size());
+
+  for (int i = 0; i < m_tabs.size(); ++i) {
+    if (!m_tabs[i].thumbnailPath.isEmpty()) {
+      withThumb.push_back(i);
+    }
+  }
+
+  if (withThumb.size() <= kMaxThumbnails) {
+    return;
+  }
+
+  std::sort(withThumb.begin(), withThumb.end(), [this, keepTabId](int a, int b) {
+    const auto& ta = m_tabs[a];
+    const auto& tb = m_tabs[b];
+
+    const bool aKeep = keepTabId > 0 && ta.id == keepTabId;
+    const bool bKeep = keepTabId > 0 && tb.id == keepTabId;
+    if (aKeep != bKeep) {
+      return !aKeep;
+    }
+
+    if (ta.thumbnailLastUsedMs != tb.thumbnailLastUsedMs) {
+      return ta.thumbnailLastUsedMs < tb.thumbnailLastUsedMs;
+    }
+    return ta.id < tb.id;
+  });
+
+  const int toEvict = withThumb.size() - kMaxThumbnails;
+  for (int i = 0; i < toEvict; ++i) {
+    const int index = withThumb[i];
+    auto& tab = m_tabs[index];
+    if (keepTabId > 0 && tab.id == keepTabId) {
+      continue;
+    }
+
+    removeFileIfSafe(tab.thumbnailPath);
+    tab.thumbnailPath.clear();
+    tab.thumbnailVersion++;
+    tab.thumbnailLastUsedMs = 0;
+    emit dataChanged(this->index(index), this->index(index), {ThumbnailUrlRole});
   }
 }

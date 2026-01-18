@@ -4323,9 +4323,26 @@ ApplicationWindow {
                                 property bool dropAfter: false
                                 readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem))
 
-                                ToolTip.visible: hovered
-                                ToolTip.delay: 500
-                                ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+                                Timer {
+                                    id: tabPreviewDelayTimer
+                                    interval: 300
+                                    repeat: false
+                                    onTriggered: {
+                                        if (!parent.hovered || tabId <= 0) {
+                                            return
+                                        }
+                                        root.openTabPreview(parent, tabId, title, url, thumbnailUrl)
+                                    }
+                                }
+
+                                onHoveredChanged: {
+                                    if (hovered) {
+                                        tabPreviewDelayTimer.restart()
+                                    } else {
+                                        tabPreviewDelayTimer.stop()
+                                        root.closeTabPreviewIfTabId(tabId)
+                                    }
+                                }
 
                                 background: Rectangle {
                                     radius: 8
@@ -4695,9 +4712,37 @@ ApplicationWindow {
                         readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem))
                         hoverEnabled: true
 
-                        ToolTip.visible: hovered && !renaming
-                        ToolTip.delay: 500
-                        ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
+                        Timer {
+                            id: tabPreviewDelayTimer
+                            interval: 300
+                            repeat: false
+                            onTriggered: {
+                                if (!parent.hovered || renaming || tabDrag.active || tabId <= 0) {
+                                    return
+                                }
+                                root.openTabPreview(parent, tabId, title, url, thumbnailUrl)
+                            }
+                        }
+
+                        onHoveredChanged: {
+                            if (hovered && !renaming && !tabDrag.active) {
+                                tabPreviewDelayTimer.restart()
+                            } else {
+                                tabPreviewDelayTimer.stop()
+                                root.closeTabPreviewIfTabId(tabId)
+                            }
+                        }
+
+                        onRenamingChanged: {
+                            if (renaming) {
+                                tabPreviewDelayTimer.stop()
+                                root.closeTabPreviewIfTabId(tabId)
+                                return
+                            }
+                            if (hovered && !tabDrag.active) {
+                                tabPreviewDelayTimer.restart()
+                            }
+                        }
 
                         background: Rectangle {
                             radius: 8
@@ -5126,6 +5171,7 @@ ApplicationWindow {
                 WebView2View {
                     id: tabWeb
                     required property int tabId
+                    property int lastThumbnailCaptureMs: 0
 
                     readonly property int paneIndex: splitView.enabled
                                                           ? splitView.paneIndexForTabId(tabId)
@@ -5171,6 +5217,9 @@ ApplicationWindow {
                         if (tabId > 0) {
                             browser.setTabIsLoadingById(tabId, isLoading)
                         }
+                        if (!isLoading) {
+                            scheduleThumbnailCapture()
+                        }
                     }
 
                     onNavigationCommitted: (success) => {
@@ -5215,13 +5264,64 @@ ApplicationWindow {
                         }
                     }
 
+                    Timer {
+                        id: thumbnailCaptureTimer
+                        interval: browser && browser.settings && browser.settings.reduceMotion ? 650 : 250
+                        repeat: false
+                        onTriggered: {
+                            if (!tabWeb.visible || !tabWeb.initialized || tabWeb.tabId <= 0) {
+                                return
+                            }
+                            if (!tabWeb.capturePreview || !diagnostics || !diagnostics.dataDir || diagnostics.dataDir.length === 0) {
+                                return
+                            }
+
+                            const now = Date.now()
+                            const minInterval = browser && browser.settings && browser.settings.reduceMotion ? 2000 : 800
+                            if (now - tabWeb.lastThumbnailCaptureMs < minInterval) {
+                                thumbnailCaptureTimer.restart()
+                                return
+                            }
+
+                            tabWeb.lastThumbnailCaptureMs = now
+                            const base = String(diagnostics.dataDir || "")
+                            const path = base + "/thumbnails/tab_" + tabWeb.tabId + ".png"
+                            tabWeb.capturePreview(path)
+                        }
+                    }
+
+                    function scheduleThumbnailCapture() {
+                        if (!tabWeb.visible || !tabWeb.initialized || tabWeb.tabId <= 0) {
+                            return
+                        }
+                        thumbnailCaptureTimer.restart()
+                    }
+
+                    onCapturePreviewFinished: (filePath, success, error) => {
+                        if (!success) {
+                            return
+                        }
+
+                        if (tabId > 0 && browser && browser.tabs && browser.tabs.setThumbnailPathById) {
+                            browser.tabs.setThumbnailPathById(tabId, String(filePath || ""))
+                        }
+                    }
+
+                    onVisibleChanged: {
+                        if (visible && !isLoading) {
+                            scheduleThumbnailCapture()
+                        }
+                    }
+
                     onFocusReceived: {
                         if (!splitView.enabled) {
                             splitView.focusedPane = 0
+                            scheduleThumbnailCapture()
                             return
                         }
                         if (paneIndex >= 0) {
                             splitView.focusedPane = paneIndex
+                            scheduleThumbnailCapture()
                         }
                     }
 
@@ -5737,6 +5837,117 @@ ApplicationWindow {
 
     ToolWindowManager {
         id: toolWindowManager
+    }
+
+    ToolWindowManager {
+        id: tabPreviewManager
+    }
+
+    QtObject {
+        id: tabPreviewState
+        property int tabId: 0
+        property string title: ""
+        property url url: ""
+        property url thumbnailUrl: ""
+    }
+
+    function openTabPreview(anchorItem, tabId, title, url, thumbnailUrl) {
+        if (!anchorItem || tabId <= 0) {
+            return
+        }
+
+        tabPreviewState.tabId = tabId
+        tabPreviewState.title = String(title || "")
+        tabPreviewState.url = url
+        tabPreviewState.thumbnailUrl = thumbnailUrl
+
+        if (browser && browser.tabs && browser.tabs.markThumbnailUsedById) {
+            browser.tabs.markThumbnailUsedById(tabId)
+        }
+
+        const pos = anchorItem.mapToItem(tabPreviewManager, anchorItem.width + 12, 0)
+        tabPreviewManager.openAtPoint(tabPreviewComponent, pos.x, pos.y, root.contentItem)
+    }
+
+    function closeTabPreviewIfTabId(tabId) {
+        if (tabPreviewState.tabId === tabId) {
+            tabPreviewManager.close()
+        }
+    }
+
+    Connections {
+        target: tabPreviewManager
+
+        function onClosed() {
+            tabPreviewState.tabId = 0
+            tabPreviewState.title = ""
+            tabPreviewState.url = ""
+            tabPreviewState.thumbnailUrl = ""
+        }
+    }
+
+    Component {
+        id: tabPreviewComponent
+
+        Rectangle {
+            id: card
+            implicitWidth: 360
+            implicitHeight: 260
+            radius: root.uiRadius
+            color: Qt.rgba(1, 1, 1, 0.98)
+            border.color: Qt.rgba(0, 0, 0, 0.12)
+            border.width: 1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: root.uiSpacing
+                spacing: Math.max(6, Math.round(root.uiSpacing / 2))
+
+                Rectangle {
+                    id: previewFrame
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 190
+                    radius: Math.max(6, Math.round(root.uiRadius * 0.8))
+                    color: Qt.rgba(0, 0, 0, 0.06)
+                    clip: true
+
+                    Image {
+                        id: previewImage
+                        anchors.fill: parent
+                        visible: tabPreviewState.thumbnailUrl && tabPreviewState.thumbnailUrl.toString().length > 0
+                        source: tabPreviewState.thumbnailUrl
+                        asynchronous: true
+                        cache: false
+                        fillMode: Image.PreserveAspectFit
+                        sourceSize.width: 640
+                        sourceSize.height: 360
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "No preview"
+                        opacity: 0.65
+                        visible: !previewImage.visible
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: tabPreviewState.title && tabPreviewState.title.length > 0 ? tabPreviewState.title : "Tab"
+                    elide: Text.ElideRight
+                    font.bold: true
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: tabPreviewState.url ? tabPreviewState.url.toString() : ""
+                    visible: text.length > 0
+                    opacity: 0.65
+                    font.pixelSize: 12
+                    elide: Text.ElideMiddle
+                }
+            }
+        }
     }
 
     Component {

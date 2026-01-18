@@ -25,6 +25,7 @@ public:
     IsEssentialRole,
     GroupIdRole,
     FaviconUrlRole,
+    ThumbnailUrlRole,
     IsLoadingRole,
     IsAudioPlayingRole,
     IsMutedRole,
@@ -78,6 +79,10 @@ public:
   Q_INVOKABLE QUrl faviconUrlAt(int index) const;
   Q_INVOKABLE void setFaviconUrlAt(int index, const QUrl& url);
 
+  Q_INVOKABLE QUrl thumbnailUrlAt(int index) const;
+  Q_INVOKABLE void setThumbnailPathById(int tabId, const QString& filePath);
+  Q_INVOKABLE void markThumbnailUsedById(int tabId);
+
   Q_INVOKABLE bool isLoadingAt(int index) const;
   Q_INVOKABLE void setLoadingAt(int index, bool loading);
 
@@ -112,6 +117,9 @@ private:
     bool essential = false;
     int groupId = 0;
     QUrl faviconUrl;
+    QString thumbnailPath;
+    int thumbnailVersion = 0;
+    qint64 thumbnailLastUsedMs = 0;
     bool isLoading = false;
     bool isAudioPlaying = false;
     bool isMuted = false;
@@ -124,6 +132,9 @@ private:
   int m_activeIndex = -1;
   int m_nextId = 1;
 
+  static constexpr int kMaxThumbnails = 30;
+
   void removeTabInternal(int index, bool recordClosed);
   void updateActiveIndexAfterClose(int closedIndex);
+  void enforceThumbnailLimit(int keepTabId = 0);
 };

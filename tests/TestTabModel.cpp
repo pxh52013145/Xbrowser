@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
 
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+
 #include "core/BrowserController.h"
 #include "core/TabModel.h"
 
@@ -286,6 +290,44 @@ private slots:
     browser.deleteTabGroup(groupId);
     QCOMPARE(browser.tabGroups()->count(), 0);
     QCOMPARE(browser.tabs()->groupIdAt(tabIndex), 0);
+  }
+
+  void thumbnailCache_evictsLeastRecentlyUsedAndDeletesFiles()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    QDir base(dir.path());
+    QVERIFY(base.mkpath("thumbnails"));
+
+    TabModel model;
+    for (int i = 0; i < 40; ++i) {
+      const int idx = model.addTab(QUrl(QStringLiteral("https://example.com/%1").arg(i)));
+      QVERIFY(idx >= 0);
+      const int tabId = model.tabIdAt(idx);
+      QVERIFY(tabId > 0);
+
+      const QString path = base.filePath(QStringLiteral("thumbnails/tab_%1.png").arg(tabId));
+      QFile f(path);
+      QVERIFY(f.open(QIODevice::WriteOnly));
+      QVERIFY(f.write("x") > 0);
+      f.close();
+
+      model.setThumbnailPathById(tabId, path);
+    }
+
+    int withThumb = 0;
+    for (int i = 0; i < model.count(); ++i) {
+      const QUrl url = model.data(model.index(i, 0), TabModel::ThumbnailUrlRole).toUrl();
+      if (!url.isEmpty()) {
+        ++withThumb;
+      }
+    }
+    QCOMPARE(withThumb, 30);
+
+    QVERIFY(!QFile::exists(base.filePath(QStringLiteral("thumbnails/tab_1.png"))));
+    QVERIFY(QFile::exists(base.filePath(QStringLiteral("thumbnails/tab_40.png"))));
   }
 };
 
