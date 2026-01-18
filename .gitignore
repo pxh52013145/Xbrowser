@@ -47,3 +47,6 @@ Win32/
 
 # Local run data
 /data/
+
+# CTest artifacts (if run from repo root)
+/Testing/

@@ -2,12 +2,14 @@
 
 ## Recommended (development)
 
-- Build + run: `scripts\\dev.cmd` (or `.\scripts\dev.ps1 -Config Debug`)
-- Run existing build: `scripts\\run.cmd` (or `.\scripts\run.ps1 -Config Debug`)
+- Build + run: `dev.cmd` (or `scripts\\dev.cmd`, or `.\scripts\dev.ps1 -Config Debug`)
+- Run existing build: `run.cmd` (or `scripts\\run.cmd`, or `.\scripts\run.ps1 -Config Debug`)
 
 `run.ps1` auto-deploys the Qt runtime (via `windeployqt`) if the build output is missing Qt DLLs/plugins (checks `platforms\\qwindows*.dll` + QML folders).
 
 If you double-click the `.cmd` launchers and something fails, the window will pause so you can read the error.
+
+Note: when `XBROWSER_AUTO_DEPLOY_QT=ON`, the build runs `windeployqt` after linking `xbrowser`. If a running `xbrowser.exe` has locked Qt DLLs, `windeployqt` may fail; this is treated as a warning for **Debug** builds. Close `xbrowser.exe` and rebuild (or run `deploy.cmd`) to refresh the deployed runtime.
 
 ## Direct exe (double-clickable)
 

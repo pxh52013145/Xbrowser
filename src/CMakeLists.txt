@@ -88,16 +88,14 @@ if(WIN32)
 
     if(XBROWSER_WINDEPLOYQT_EXECUTABLE)
       add_custom_command(TARGET xbrowser POST_BUILD
-        COMMAND "${XBROWSER_WINDEPLOYQT_EXECUTABLE}"
-          $<$<CONFIG:Debug>:--debug>
-          --force
-          --no-translations
-          --compiler-runtime
-          --qmldir "${CMAKE_SOURCE_DIR}/ui/qml"
-          "$<TARGET_FILE:xbrowser>"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-          "${CMAKE_SOURCE_DIR}/cmake/qt.conf"
-          "$<TARGET_FILE_DIR:xbrowser>/qt.conf"
+        COMMAND "${CMAKE_COMMAND}"
+          "-DWINDEPLOYQT=${XBROWSER_WINDEPLOYQT_EXECUTABLE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DQMLDIR=${CMAKE_SOURCE_DIR}/ui/qml"
+          "-DEXE=$<TARGET_FILE:xbrowser>"
+          "-DTARGET_DIR=$<TARGET_FILE_DIR:xbrowser>"
+          "-DQTCONF_SOURCE=${CMAKE_SOURCE_DIR}/cmake/qt.conf"
+          -P "${CMAKE_SOURCE_DIR}/cmake/RunWinDeployQt.cmake"
         VERBATIM
       )
     else()
