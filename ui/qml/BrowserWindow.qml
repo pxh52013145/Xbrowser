@@ -281,6 +281,9 @@ ApplicationWindow {
             MenuItem { text: "Reset Zoom"; onTriggered: commands.invoke("zoom-reset") }
             MenuSeparator { }
             MenuItem { text: splitView.enabled ? "Unsplit View" : "Split View"; onTriggered: commands.invoke("toggle-split-view") }
+            MenuItem { visible: splitView.enabled; text: "Swap Split Panes"; onTriggered: commands.invoke("split-swap") }
+            MenuItem { visible: splitView.enabled; text: "Close Split Pane"; onTriggered: commands.invoke("split-close-pane") }
+            MenuItem { visible: splitView.enabled; text: "Focus Next Split Pane"; onTriggered: commands.invoke("split-focus-next") }
         }
 
         Menu {
@@ -6269,6 +6272,24 @@ ApplicationWindow {
             if (id === "focus-split-secondary") {
                 if (splitView.enabled) {
                     splitView.focusedPane = 1
+                }
+                return
+            }
+            if (id === "split-swap") {
+                if (splitView.enabled) {
+                    splitView.swapPanes()
+                }
+                return
+            }
+            if (id === "split-close-pane") {
+                if (splitView.enabled) {
+                    splitView.closeFocusedPane()
+                }
+                return
+            }
+            if (id === "split-focus-next") {
+                if (splitView.enabled) {
+                    splitView.focusNextPane()
                 }
                 return
             }

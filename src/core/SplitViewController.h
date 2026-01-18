@@ -45,6 +45,9 @@ public:
   Q_INVOKABLE void setTabIdForPane(int pane, int tabId);
   Q_INVOKABLE int paneIndexForTabId(int tabId) const;
   Q_INVOKABLE bool openUrlInNewPane(const QUrl& url);
+  Q_INVOKABLE void swapPanes();
+  Q_INVOKABLE void closeFocusedPane();
+  Q_INVOKABLE void focusNextPane();
 
   int focusedPane() const;
   void setFocusedPane(int pane);

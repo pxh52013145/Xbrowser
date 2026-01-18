@@ -4,6 +4,7 @@
 #include "TabModel.h"
 
 #include <QSet>
+#include <utility>
 
 SplitViewController::SplitViewController(QObject* parent)
   : QObject(parent)
@@ -231,6 +232,107 @@ bool SplitViewController::openUrlInNewPane(const QUrl& url)
   m_browser->activateTabById(tabId);
   setFocusedPane(targetPane);
   return true;
+}
+
+void SplitViewController::swapPanes()
+{
+  if (!m_enabled) {
+    return;
+  }
+
+  const int count = qBound(2, m_paneCount, 4);
+  if (count < 2) {
+    return;
+  }
+
+  if (m_paneTabIds.size() < count) {
+    ensureTabs();
+  }
+  if (m_paneTabIds.size() < 2) {
+    return;
+  }
+
+  std::swap(m_paneTabIds[0], m_paneTabIds[1]);
+
+  if (m_focusedPane == 0) {
+    setFocusedPane(1);
+  } else if (m_focusedPane == 1) {
+    setFocusedPane(0);
+  }
+
+  emit tabsChanged();
+}
+
+void SplitViewController::closeFocusedPane()
+{
+  if (!m_enabled) {
+    return;
+  }
+
+  const int count = qBound(2, m_paneCount, 4);
+  if (count < 2) {
+    return;
+  }
+
+  if (m_paneTabIds.size() < count) {
+    ensureTabs();
+  }
+
+  const int pane = qBound(0, m_focusedPane, count - 1);
+
+  if (count <= 2) {
+    const int remainingPane = (pane == 0) ? 1 : 0;
+    const int remainingTabId = tabIdForPane(remainingPane);
+
+    if (m_paneTabIds.size() < 2) {
+      m_paneTabIds.resize(2);
+    }
+    m_paneTabIds[0] = remainingTabId;
+    m_paneTabIds[1] = 0;
+
+    if (m_browser && remainingTabId > 0) {
+      m_browser->activateTabById(remainingTabId);
+    }
+
+    setEnabled(false);
+    emit tabsChanged();
+    return;
+  }
+
+  QVector<int> next;
+  next.reserve(count - 1);
+  for (int i = 0; i < count; ++i) {
+    if (i == pane) {
+      continue;
+    }
+    next.push_back(i < m_paneTabIds.size() ? m_paneTabIds[i] : 0);
+  }
+
+  m_paneTabIds = next;
+  m_paneCount = count - 1;
+
+  if (m_focusedPane > pane) {
+    setFocusedPane(m_focusedPane - 1);
+  } else if (m_focusedPane == pane) {
+    setFocusedPane(qMin(pane, m_paneCount - 1));
+  }
+
+  emit tabsChanged();
+}
+
+void SplitViewController::focusNextPane()
+{
+  if (!m_enabled) {
+    return;
+  }
+
+  const int count = qBound(2, m_paneCount, 4);
+  if (count < 2) {
+    return;
+  }
+
+  const int current = qBound(0, m_focusedPane, count - 1);
+  setFocusedPane((current + 1) % count);
 }
 
 int SplitViewController::focusedPane() const

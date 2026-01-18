@@ -315,7 +315,7 @@ void ShortcutStore::reload()
 QVector<ShortcutStore::Entry> ShortcutStore::buildDefaults() const
 {
   QVector<Entry> entries;
-  entries.reserve(48);
+  entries.reserve(56);
 
   auto add = [&entries](QString id, QString group, QString title, QString command, QString sequence, QVariantMap args = {}) {
     Entry entry;
@@ -343,6 +343,9 @@ QVector<ShortcutStore::Entry> ShortcutStore::buildDefaults() const
 
   add(QStringLiteral("open-devtools"), QStringLiteral("Tools"), QStringLiteral("Open DevTools"), QStringLiteral("open-devtools"), QStringLiteral("F12"));
   add(QStringLiteral("toggle-split-view"), QStringLiteral("View"), QStringLiteral("Toggle Split View"), QStringLiteral("toggle-split-view"), QStringLiteral("Ctrl+E"));
+  add(QStringLiteral("split-swap"), QStringLiteral("View"), QStringLiteral("Swap Split Panes"), QStringLiteral("split-swap"), QStringLiteral("Ctrl+Shift+S"));
+  add(QStringLiteral("split-close-pane"), QStringLiteral("View"), QStringLiteral("Close Split Pane"), QStringLiteral("split-close-pane"), QStringLiteral("Ctrl+Shift+E"));
+  add(QStringLiteral("split-focus-next"), QStringLiteral("View"), QStringLiteral("Focus Next Split Pane"), QStringLiteral("split-focus-next"), QStringLiteral("Ctrl+Alt+Down"));
   add(QStringLiteral("open-find"), QStringLiteral("Tools"), QStringLiteral("Find in Page"), QStringLiteral("open-find"), QStringLiteral("Ctrl+F"));
   add(QStringLiteral("open-print"), QStringLiteral("Tools"), QStringLiteral("Print"), QStringLiteral("open-print"), QStringLiteral("Ctrl+P"));
   add(QStringLiteral("open-file"), QStringLiteral("File"), QStringLiteral("Open File"), QStringLiteral("open-file"), QStringLiteral("Ctrl+O"));

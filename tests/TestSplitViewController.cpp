@@ -116,6 +116,108 @@ private slots:
     QCOMPARE(tabs->initialUrlAt(thirdIndex), QUrl("https://c.example"));
     QCOMPARE(tabs->tabIdAt(tabs->activeIndex()), thirdId);
   }
+
+  void swapPanes_swapsPrimaryAndSecondary_andFocusFollowsTab()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    TabModel* tabs = browser.tabs();
+    QVERIFY(tabs);
+
+    tabs->addTabWithId(100, QUrl("https://a.example"), "A", false);
+    tabs->addTabWithId(101, QUrl("https://b.example"), "B", false);
+    tabs->setActiveIndex(0);
+
+    split.setPaneCount(2);
+    split.setTabIdForPane(0, 100);
+    split.setTabIdForPane(1, 101);
+    split.setEnabled(true);
+    split.setFocusedPane(0);
+
+    split.swapPanes();
+
+    QCOMPARE(split.tabIdForPane(0), 101);
+    QCOMPARE(split.tabIdForPane(1), 100);
+    QCOMPARE(split.focusedPane(), 1);
+  }
+
+  void closeFocusedPane_withThreePanes_removesPaneAndKeepsEnabled()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    TabModel* tabs = browser.tabs();
+    QVERIFY(tabs);
+
+    tabs->addTabWithId(100, QUrl("https://a.example"), "A", false);
+    tabs->addTabWithId(101, QUrl("https://b.example"), "B", false);
+    tabs->addTabWithId(102, QUrl("https://c.example"), "C", false);
+    tabs->setActiveIndex(0);
+
+    split.setPaneCount(3);
+    split.setTabIdForPane(0, 100);
+    split.setTabIdForPane(1, 101);
+    split.setTabIdForPane(2, 102);
+    split.setEnabled(true);
+    split.setFocusedPane(1);
+
+    split.closeFocusedPane();
+
+    QVERIFY(split.enabled());
+    QCOMPARE(split.paneCount(), 2);
+    QCOMPARE(split.tabIdForPane(0), 100);
+    QCOMPARE(split.tabIdForPane(1), 102);
+    QCOMPARE(split.focusedPane(), 1);
+  }
+
+  void closeFocusedPane_withTwoPanes_disablesSplitView()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    TabModel* tabs = browser.tabs();
+    QVERIFY(tabs);
+
+    tabs->addTabWithId(100, QUrl("https://a.example"), "A", false);
+    tabs->addTabWithId(101, QUrl("https://b.example"), "B", false);
+    tabs->setActiveIndex(0);
+
+    split.setPaneCount(2);
+    split.setTabIdForPane(0, 100);
+    split.setTabIdForPane(1, 101);
+    split.setEnabled(true);
+    split.setFocusedPane(1);
+
+    split.closeFocusedPane();
+
+    QVERIFY(!split.enabled());
+    QCOMPARE(split.paneCount(), 2);
+    QCOMPARE(split.tabIdForPane(0), 100);
+    QCOMPARE(split.tabIdForPane(1), 0);
+    QCOMPARE(split.focusedPane(), 0);
+  }
+
+  void focusNextPane_cyclesThroughEnabledPanes()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    split.setPaneCount(3);
+    split.setEnabled(true);
+
+    split.setFocusedPane(0);
+    split.focusNextPane();
+    QCOMPARE(split.focusedPane(), 1);
+    split.focusNextPane();
+    QCOMPARE(split.focusedPane(), 2);
+    split.focusNextPane();
+    QCOMPARE(split.focusedPane(), 0);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSplitViewController)

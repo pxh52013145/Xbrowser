@@ -81,6 +81,8 @@ private slots:
       split.setGridSplitRatioY(0.72);
       split.setEnabled(true);
       split.setFocusedPane(2);
+      split.swapPanes();
+      split.closeFocusedPane();
 
       QString error;
       QVERIFY(store.saveNow(&error));
@@ -138,13 +140,12 @@ private slots:
       QCOMPARE(tabs->tabIdAt(tabs->activeIndex()), 101);
 
       QVERIFY(split.enabled());
-      QCOMPARE(split.paneCount(), 4);
-      QCOMPARE(split.primaryTabId(), 100);
-      QCOMPARE(split.secondaryTabId(), 101);
-      QCOMPARE(split.tabIdForPane(0), 100);
-      QCOMPARE(split.tabIdForPane(1), 101);
-      QCOMPARE(split.tabIdForPane(2), 102);
-      QCOMPARE(split.tabIdForPane(3), 103);
+      QCOMPARE(split.paneCount(), 3);
+      QCOMPARE(split.primaryTabId(), 101);
+      QCOMPARE(split.secondaryTabId(), 100);
+      QCOMPARE(split.tabIdForPane(0), 101);
+      QCOMPARE(split.tabIdForPane(1), 100);
+      QCOMPARE(split.tabIdForPane(2), 103);
       QCOMPARE(split.focusedPane(), 2);
       QVERIFY(qAbs(split.splitRatio() - 0.63) < 0.0001);
       QVERIFY(qAbs(split.gridSplitRatioX() - 0.41) < 0.0001);
