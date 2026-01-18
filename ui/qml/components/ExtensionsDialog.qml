@@ -308,6 +308,12 @@ Item {
                             anchors.fill: parent
 
                             readonly property var entry: list.currentItem ? list.currentItem : null
+                            readonly property var commandEntries: {
+                                if (!detailsHost.entry || !extensionsStore || !extensionsStore.commandsFor) {
+                                    return []
+                                }
+                                return extensionsStore.commandsFor(detailsHost.entry.extensionId)
+                            }
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -432,7 +438,111 @@ Item {
                                             Layout.fillWidth: true
                                             height: 1
                                             color: Qt.rgba(0, 0, 0, 0.08)
-                                            visible: (detailsHost.entry && ((detailsHost.entry.permissions && detailsHost.entry.permissions.length > 0) || (detailsHost.entry.hostPermissions && detailsHost.entry.hostPermissions.length > 0)))
+                                            visible: (detailsHost.entry && ((detailsHost.commandEntries && detailsHost.commandEntries.length > 0) || (detailsHost.entry.permissions && detailsHost.entry.permissions.length > 0) || (detailsHost.entry.hostPermissions && detailsHost.entry.hostPermissions.length > 0)))
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+                                            visible: detailsHost.commandEntries && detailsHost.commandEntries.length > 0
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: "Commands"
+                                                    font.bold: true
+                                                    opacity: 0.9
+                                                }
+
+                                                ToolButton {
+                                                    text: "Copy"
+                                                    onClicked: {
+                                                        const list = detailsHost.commandEntries || []
+                                                        const text = list.map(v => {
+                                                            const id = String(v.commandId || "")
+                                                            const seq = String(v.suggestedKeySequence || "")
+                                                            return seq.length > 0 ? (id + "\t" + seq) : id
+                                                        }).join("\n")
+                                                        commands.invoke("copy-text", { text })
+                                                    }
+                                                }
+                                            }
+
+                                            Repeater {
+                                                model: detailsHost.commandEntries || []
+                                                delegate: ColumnLayout {
+                                                    required property var modelData
+                                                    Layout.fillWidth: true
+                                                    spacing: 2
+
+                                                    readonly property string commandId: String(modelData.commandId || "")
+                                                    readonly property string description: String(modelData.description || "")
+                                                    readonly property string keySequence: String(modelData.suggestedKeySequence || "")
+                                                    readonly property var conflicts: (keySequence.length > 0 && shortcutStore && shortcutStore.conflictsForSequence)
+                                                                                   ? shortcutStore.conflictsForSequence(keySequence)
+                                                                                   : []
+
+                                                    readonly property string conflictText: {
+                                                        if (!conflicts || conflicts.length === 0) {
+                                                            return ""
+                                                        }
+                                                        const titles = []
+                                                        for (const c of conflicts) {
+                                                            const title = String(c.title || c.entryId || "")
+                                                            if (title.length > 0) {
+                                                                titles.push(title)
+                                                            }
+                                                        }
+                                                        return titles.length > 0 ? ("Conflicts with XBrowser: " + titles.join(", ")) : "Conflicts with XBrowser shortcut"
+                                                    }
+
+                                                    RowLayout {
+                                                        Layout.fillWidth: true
+                                                        spacing: 6
+
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: commandId.length > 0 ? commandId : "(command)"
+                                                            elide: Text.ElideRight
+                                                            opacity: 0.9
+                                                        }
+
+                                                        Label {
+                                                            text: keySequence.length > 0 ? keySequence : ""
+                                                            visible: keySequence.length > 0
+                                                            opacity: 0.75
+                                                            font.pixelSize: 11
+                                                        }
+
+                                                        Label {
+                                                            text: keySequence.length === 0 ? "Unassigned" : ""
+                                                            visible: keySequence.length === 0
+                                                            opacity: 0.55
+                                                            font.pixelSize: 11
+                                                        }
+                                                    }
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: description
+                                                        visible: description.length > 0
+                                                        opacity: 0.75
+                                                        wrapMode: Text.Wrap
+                                                    }
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: conflictText
+                                                        visible: conflictText.length > 0
+                                                        opacity: 0.9
+                                                        color: "#b45309"
+                                                        wrapMode: Text.Wrap
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         ColumnLayout {

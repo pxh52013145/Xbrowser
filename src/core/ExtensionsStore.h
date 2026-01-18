@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 
 class ExtensionsStore final : public QObject
 {
@@ -36,6 +37,7 @@ public:
   Q_INVOKABLE QStringList permissionsFor(const QString& extensionId);
   Q_INVOKABLE QStringList hostPermissionsFor(const QString& extensionId);
   Q_INVOKABLE qint64 manifestMtimeMsFor(const QString& extensionId);
+  Q_INVOKABLE QVariantList commandsFor(const QString& extensionId);
 
   Q_INVOKABLE void setMeta(
     const QString& extensionId,

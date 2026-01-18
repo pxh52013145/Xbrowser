@@ -301,6 +301,33 @@ void ShortcutStore::resetAll()
   bumpRevision();
 }
 
+QVariantList ShortcutStore::conflictsForSequence(const QString& sequence)
+{
+  ensureLoaded();
+
+  const QString normalized = normalizeSequenceString(sequence);
+  if (normalized.isEmpty()) {
+    return {};
+  }
+
+  QVariantList out;
+  for (const Entry& entry : m_entries) {
+    const QString current = entry.sequence.trimmed();
+    if (current.isEmpty() || current != normalized) {
+      continue;
+    }
+
+    QVariantMap row;
+    row.insert(QStringLiteral("entryId"), entry.id);
+    row.insert(QStringLiteral("group"), entry.group);
+    row.insert(QStringLiteral("title"), entry.title);
+    row.insert(QStringLiteral("command"), entry.command);
+    out.append(std::move(row));
+  }
+
+  return out;
+}
+
 void ShortcutStore::reload()
 {
   ensureStoragePath();

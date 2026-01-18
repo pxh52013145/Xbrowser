@@ -61,9 +61,29 @@ private slots:
     const QString after = store.data(store.index(row, 0), ShortcutStore::SequenceRole).toString();
     QCOMPARE(after, before);
   }
+
+  void conflictsForSequence_findsMatches()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    ShortcutStore store;
+    const QVariantList conflicts = store.conflictsForSequence(QStringLiteral("Ctrl+T"));
+    QVERIFY(!conflicts.isEmpty());
+
+    bool foundNewTab = false;
+    for (const QVariant& v : conflicts) {
+      const QVariantMap row = v.toMap();
+      if (row.value(QStringLiteral("entryId")).toString() == QStringLiteral("new-tab")) {
+        foundNewTab = true;
+        break;
+      }
+    }
+    QVERIFY(foundNewTab);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestShortcutStore)
 
 #include "TestShortcutStore.moc"
-

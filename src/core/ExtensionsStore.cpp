@@ -7,13 +7,36 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeySequence>
 #include <QSaveFile>
+
+#include <algorithm>
 
 namespace
 {
 QString normalizedId(const QString& raw)
 {
   return raw.trimmed();
+}
+
+QString normalizeCommandShortcut(const QString& raw)
+{
+  const QString trimmed = raw.trimmed();
+  if (trimmed.isEmpty()) {
+    return {};
+  }
+
+  const QKeySequence seq = QKeySequence::fromString(trimmed, QKeySequence::PortableText);
+  if (!seq.isEmpty()) {
+    return seq.toString(QKeySequence::NativeText);
+  }
+
+  const QKeySequence nativeSeq = QKeySequence::fromString(trimmed, QKeySequence::NativeText);
+  if (!nativeSeq.isEmpty()) {
+    return nativeSeq.toString(QKeySequence::NativeText);
+  }
+
+  return trimmed;
 }
 }
 
@@ -366,6 +389,96 @@ qint64 ExtensionsStore::manifestMtimeMsFor(const QString& extensionId)
   const QString id = normalizedId(extensionId);
   const auto it = m_meta.constFind(id);
   return it == m_meta.constEnd() ? 0 : it->manifestMtimeMs;
+}
+
+QVariantList ExtensionsStore::commandsFor(const QString& extensionId)
+{
+  ensureLoaded();
+
+  const QString id = normalizedId(extensionId);
+  const auto metaIt = m_meta.constFind(id);
+  if (metaIt == m_meta.constEnd()) {
+    return {};
+  }
+
+  const QString installPath = metaIt->installPath.trimmed();
+  if (installPath.isEmpty()) {
+    return {};
+  }
+
+  QFile f(QDir(installPath).filePath(QStringLiteral("manifest.json")));
+  if (!f.exists() || !f.open(QIODevice::ReadOnly)) {
+    return {};
+  }
+
+  const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+  if (!doc.isObject()) {
+    return {};
+  }
+
+  const QJsonObject root = doc.object();
+  const QJsonObject commandsObj = root.value(QStringLiteral("commands")).toObject();
+  if (commandsObj.isEmpty()) {
+    return {};
+  }
+
+  struct Entry
+  {
+    QString id;
+    QString description;
+    QString shortcut;
+  };
+
+  std::vector<Entry> entries;
+  entries.reserve(static_cast<size_t>(commandsObj.size()));
+
+  for (auto it = commandsObj.begin(); it != commandsObj.end(); ++it) {
+    const QString commandId = it.key().trimmed();
+    if (commandId.isEmpty() || !it.value().isObject()) {
+      continue;
+    }
+
+    const QJsonObject obj = it.value().toObject();
+    const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
+
+    QString shortcut;
+    const QJsonValue suggested = obj.value(QStringLiteral("suggested_key"));
+    if (suggested.isObject()) {
+      const QJsonObject suggestedObj = suggested.toObject();
+      shortcut = suggestedObj.value(QStringLiteral("windows")).toString().trimmed();
+      if (shortcut.isEmpty()) {
+        shortcut = suggestedObj.value(QStringLiteral("default")).toString().trimmed();
+      }
+    } else if (suggested.isString()) {
+      shortcut = suggested.toString().trimmed();
+    }
+
+    Entry entry;
+    entry.id = commandId;
+    entry.description = description;
+    entry.shortcut = normalizeCommandShortcut(shortcut);
+    entries.push_back(std::move(entry));
+  }
+
+  if (entries.empty()) {
+    return {};
+  }
+
+  std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+    return a.id < b.id;
+  });
+
+  QVariantList out;
+  out.reserve(static_cast<int>(entries.size()));
+  for (const auto& entry : entries) {
+    QVariantMap row;
+    row.insert(QStringLiteral("commandId"), entry.id);
+    row.insert(QStringLiteral("description"), entry.description);
+    row.insert(QStringLiteral("suggestedKeySequence"), entry.shortcut);
+    out.append(std::move(row));
+  }
+
+  return out;
 }
 
 void ExtensionsStore::setMeta(

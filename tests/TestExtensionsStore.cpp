@@ -1,5 +1,7 @@
 #include <QtTest/QtTest>
 
+#include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include "core/ExtensionsStore.h"
@@ -113,6 +115,53 @@ private slots:
     QCOMPARE(store.hostPermissionsFor(QStringLiteral("ext")),
              QStringList({QStringLiteral("<all_urls>"), QStringLiteral("https://example.com/*")}));
     QCOMPARE(store.manifestMtimeMsFor(QStringLiteral("ext")), 1234);
+  }
+
+  void commandsFor_parsesManifestCommands()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    ExtensionsStore& store = ExtensionsStore::instance();
+    store.clearAll();
+
+    const QString installPath = dir.filePath(QStringLiteral("ext-install"));
+    QVERIFY(QDir().mkpath(installPath));
+
+    QFile manifest(QDir(installPath).filePath(QStringLiteral("manifest.json")));
+    QVERIFY(manifest.open(QIODevice::WriteOnly));
+    manifest.write(R"({
+      "manifest_version": 3,
+      "name": "Test",
+      "version": "1.0.0",
+      "commands": {
+        "do-thing": {
+          "suggested_key": { "default": "Ctrl+Shift+Y" },
+          "description": "Do something"
+        },
+        "_execute_action": {
+          "suggested_key": { "windows": "Ctrl+Shift+U" },
+          "description": "Execute action"
+        }
+      }
+    })");
+    manifest.close();
+
+    store.setManifestMeta(QStringLiteral("ext"), installPath, QStringLiteral("1.0.0"), QString(), {}, {}, 1);
+
+    const QVariantList commands = store.commandsFor(QStringLiteral("ext"));
+    QCOMPARE(commands.size(), 2);
+
+    const QVariantMap first = commands.at(0).toMap();
+    QCOMPARE(first.value(QStringLiteral("commandId")).toString(), QStringLiteral("_execute_action"));
+    QCOMPARE(first.value(QStringLiteral("description")).toString(), QStringLiteral("Execute action"));
+    QCOMPARE(first.value(QStringLiteral("suggestedKeySequence")).toString(), QStringLiteral("Ctrl+Shift+U"));
+
+    const QVariantMap second = commands.at(1).toMap();
+    QCOMPARE(second.value(QStringLiteral("commandId")).toString(), QStringLiteral("do-thing"));
+    QCOMPARE(second.value(QStringLiteral("description")).toString(), QStringLiteral("Do something"));
+    QCOMPARE(second.value(QStringLiteral("suggestedKeySequence")).toString(), QStringLiteral("Ctrl+Shift+Y"));
   }
 };
 

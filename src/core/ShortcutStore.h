@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QString>
+#include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
 
@@ -39,6 +40,7 @@ public:
   Q_INVOKABLE void setUserSequence(const QString& entryId, const QString& sequence);
   Q_INVOKABLE void resetSequence(const QString& entryId);
   Q_INVOKABLE void resetAll();
+  Q_INVOKABLE QVariantList conflictsForSequence(const QString& sequence);
   Q_INVOKABLE void reload();
 
 signals:
@@ -74,4 +76,3 @@ private:
   int m_revision = 0;
   QString m_lastError;
 };
-
