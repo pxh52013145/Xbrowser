@@ -6,6 +6,9 @@
 - Run existing build: `run.cmd` (or `scripts\\run.cmd`, or `.\scripts\run.ps1 -Config Debug`)
 - Build + test: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\check.ps1 -Config Debug`
 
+If `build/` is not configured yet (missing `build\\CMakeCache.txt`), `dev.ps1`/`check.ps1` will auto-run `scripts\\configure.ps1`.
+Qt is auto-detected from `Qt6_DIR` / `CMAKE_PREFIX_PATH` or common locations like `<drive>:\\Qt\\<version>\\msvc*_64` (you can also pass `-QtPrefix`).
+
 `run.ps1` auto-deploys the Qt runtime (via `windeployqt`) if the build output is missing Qt DLLs/plugins (checks `platforms\\qwindows*.dll` + QML folders).
 
 If you double-click the `.cmd` launchers and something fails, the window will pause so you can read the error.
