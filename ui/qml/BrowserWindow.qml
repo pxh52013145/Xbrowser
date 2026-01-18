@@ -4392,16 +4392,67 @@ ApplicationWindow {
                             browser.tabGroups.setColorAt(index, groupColorPalette[i])
                         }
 
-                        Item {
-                            Layout.fillWidth: true
-                            implicitHeight: groupHeaderRow.implicitHeight
+                         Item {
+                             id: groupHeaderHost
+                             Layout.fillWidth: true
+                             implicitHeight: groupHeaderRow.implicitHeight
 
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: 6
-                                color: Qt.rgba(0.2, 0.5, 1.0, 0.12)
-                                visible: groupHeaderDrop.containsDrag
+                             function buildGroupHeaderContextMenuItems() {
+                                const items = []
+                                items.push({ action: "rename-group", text: "Rename Group", enabled: true, args: {} })
+                                items.push({ action: "delete-group", text: "Delete Group", enabled: true, args: {} })
+                                items.push({ separator: true })
+                                items.push({ action: "collapse-all-groups", text: "Collapse All Groups", enabled: true, args: {} })
+                                items.push({ action: "expand-all-groups", text: "Expand All Groups", enabled: true, args: {} })
+                                return items
                             }
+
+                            function handleGroupHeaderContextMenuAction(action) {
+                                const a = String(action || "")
+                                if (!a) {
+                                    return
+                                }
+
+                                if (a === "rename-group") {
+                                    renaming = true
+                                    groupRenameField.text = name
+                                    groupRenameField.forceActiveFocus()
+                                    groupRenameField.selectAll()
+                                    return
+                                }
+
+                                if (a === "delete-group") {
+                                    browser.deleteTabGroup(groupId)
+                                    return
+                                }
+
+                                if (a === "collapse-all-groups" || a === "expand-all-groups") {
+                                    const shouldCollapse = a === "collapse-all-groups"
+                                    const count = browser.tabGroups ? browser.tabGroups.count() : 0
+                                    for (let i = 0; i < count; i++) {
+                                        browser.tabGroups.setCollapsedAt(i, shouldCollapse)
+                                    }
+                                 }
+                             }
+
+                             HoverHandler {
+                                 id: groupHeaderHoverHandler
+                                 acceptedDevices: PointerDevice.Mouse
+                             }
+
+                             Rectangle {
+                                 anchors.fill: parent
+                                 radius: 6
+                                 color: Qt.rgba(0.2, 0.5, 1.0, 0.12)
+                                 visible: groupHeaderDrop.containsDrag
+                             }
+
+                             Rectangle {
+                                 anchors.fill: parent
+                                 radius: 6
+                                 color: Qt.rgba(0, 0, 0, 0.04)
+                                 visible: groupHeaderHoverHandler.hovered
+                             }
 
                             RowLayout {
                                 id: groupHeaderRow
@@ -4473,6 +4524,22 @@ ApplicationWindow {
                                 }
                             }
 
+                            Component {
+                                id: groupHeaderContextMenuComponent
+
+                                ContextMenu {
+                                    cornerRadius: root.uiRadius
+                                    spacing: root.uiSpacing
+                                    implicitWidth: 240
+                                    maxHeight: Math.max(200, sidebarPane.height - root.uiSpacing * 2)
+                                    items: groupHeaderHost.buildGroupHeaderContextMenuItems()
+                                    onActionTriggered: (action, args) => {
+                                        popupManager.close()
+                                        groupHeaderHost.handleGroupHeaderContextMenuAction(action)
+                                    }
+                                }
+                            }
+
                             DropArea {
                                 id: groupHeaderDrop
                                 anchors.fill: parent
@@ -4484,7 +4551,18 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                        }
+
+                             MouseArea {
+                                 id: groupHeaderContextArea
+                                 anchors.fill: parent
+                                 acceptedButtons: Qt.RightButton
+                                 onClicked: (mouse) => {
+                                     const pos = mapToItem(popupManager, mouse.x, mouse.y)
+                                     popupManager.openAtPoint(groupHeaderContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                     root.popupManagerContext = "sidebar-context-menu"
+                                 }
+                             }
+                         }
 
                         TextField {
                             id: searchField
