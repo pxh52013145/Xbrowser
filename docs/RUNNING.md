@@ -4,6 +4,7 @@
 
 - Build + run: `dev.cmd` (or `scripts\\dev.cmd`, or `.\scripts\dev.ps1 -Config Debug`)
 - Run existing build: `run.cmd` (or `scripts\\run.cmd`, or `.\scripts\run.ps1 -Config Debug`)
+- Build + test: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\check.ps1 -Config Debug`
 
 `run.ps1` auto-deploys the Qt runtime (via `windeployqt`) if the build output is missing Qt DLLs/plugins (checks `platforms\\qwindows*.dll` + QML folders).
 
