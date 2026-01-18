@@ -27,6 +27,8 @@ private slots:
     settings.setDefaultZoom(1.1);
     settings.setRememberZoomPerSite(true);
     settings.setZoomForUrl(QUrl(QStringLiteral("https://example.com/")), 1.25);
+    settings.setDndHoverSwitchWorkspaceEnabled(false);
+    settings.setDndHoverSwitchWorkspaceDelayMs(650);
 
     QTest::qWait(350);
 
@@ -47,6 +49,8 @@ private slots:
     QCOMPARE(obj.value("closeTabOnBackNoHistory").toBool(), true);
     QVERIFY(qAbs(obj.value("defaultZoom").toDouble() - 1.1) < 0.0001);
     QCOMPARE(obj.value("rememberZoomPerSite").toBool(), true);
+    QCOMPARE(obj.value("dndHoverSwitchWorkspaceEnabled").toBool(), false);
+    QCOMPARE(obj.value("dndHoverSwitchWorkspaceDelayMs").toInt(), 650);
 
     const QJsonObject zoomByHost = obj.value("zoomByHost").toObject();
     QVERIFY(qAbs(zoomByHost.value(QStringLiteral("example.com")).toDouble() - 1.25) < 0.0001);
@@ -61,6 +65,8 @@ private slots:
     QVERIFY(qAbs(reload.defaultZoom() - 1.1) < 0.0001);
     QCOMPARE(reload.rememberZoomPerSite(), true);
     QVERIFY(qAbs(reload.zoomForUrl(QUrl(QStringLiteral("https://example.com/test"))) - 1.25) < 0.0001);
+    QCOMPARE(reload.dndHoverSwitchWorkspaceEnabled(), false);
+    QCOMPARE(reload.dndHoverSwitchWorkspaceDelayMs(), 650);
   }
 };
 

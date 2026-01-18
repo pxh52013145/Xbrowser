@@ -17,6 +17,8 @@ public:
     WorkspaceIdRole = Qt::UserRole + 1,
     NameRole,
     AccentColorRole,
+    IconTypeRole,
+    IconValueRole,
     IsActiveRole,
     SidebarWidthRole,
     SidebarExpandedRole,
@@ -47,6 +49,10 @@ public:
   Q_INVOKABLE QColor accentColorAt(int index) const;
   Q_INVOKABLE void setAccentColorAt(int index, const QColor& color);
 
+  Q_INVOKABLE QString iconTypeAt(int index) const;
+  Q_INVOKABLE QString iconValueAt(int index) const;
+  Q_INVOKABLE void setIconAt(int index, const QString& type, const QString& value);
+
   Q_INVOKABLE int sidebarWidthAt(int index) const;
   Q_INVOKABLE void setSidebarWidthAt(int index, int width);
 
@@ -67,6 +73,8 @@ private:
     int id = 0;
     QString name;
     QColor accentColor;
+    QString iconType;
+    QString iconValue;
     int sidebarWidth = 260;
     bool sidebarExpanded = true;
     TabModel* tabs = nullptr;

@@ -58,6 +58,10 @@ QVariant WorkspaceModel::data(const QModelIndex& index, int role) const
       return ws.name;
     case AccentColorRole:
       return ws.accentColor;
+    case IconTypeRole:
+      return ws.iconType;
+    case IconValueRole:
+      return ws.iconValue;
     case IsActiveRole:
       return row == m_activeIndex;
     case SidebarWidthRole:
@@ -75,6 +79,8 @@ QHash<int, QByteArray> WorkspaceModel::roleNames() const
     {WorkspaceIdRole, "workspaceId"},
     {NameRole, "name"},
     {AccentColorRole, "accentColor"},
+    {IconTypeRole, "iconType"},
+    {IconValueRole, "iconValue"},
     {IsActiveRole, "isActive"},
     {SidebarWidthRole, "sidebarWidth"},
     {SidebarExpandedRole, "sidebarExpanded"},
@@ -188,6 +194,7 @@ int WorkspaceModel::duplicateWorkspace(int index)
   const int newIndex = addWorkspace(QStringLiteral("Copy of %1").arg(sourceName));
 
   setAccentColorAt(newIndex, accentColorAt(index));
+  setIconAt(newIndex, iconTypeAt(index), iconValueAt(index));
   setSidebarWidthAt(newIndex, sidebarWidthAt(index));
   setSidebarExpandedAt(newIndex, sidebarExpandedAt(index));
 
@@ -364,6 +371,49 @@ void WorkspaceModel::setAccentColorAt(int index, const QColor& color)
 
   ws.accentColor = next;
   emit dataChanged(this->index(index), this->index(index), {AccentColorRole});
+}
+
+QString WorkspaceModel::iconTypeAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].iconType;
+}
+
+QString WorkspaceModel::iconValueAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].iconValue;
+}
+
+void WorkspaceModel::setIconAt(int index, const QString& type, const QString& value)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  QString nextType = type.trimmed();
+  QString nextValue = value.trimmed();
+
+  if (nextValue.isEmpty()) {
+    nextType.clear();
+  } else if (nextType.isEmpty()) {
+    nextType = QStringLiteral("emoji");
+  } else if (nextType != QLatin1String("emoji") && nextType != QLatin1String("builtin")) {
+    nextType = QStringLiteral("emoji");
+  }
+
+  auto& ws = m_workspaces[index];
+  if (ws.iconType == nextType && ws.iconValue == nextValue) {
+    return;
+  }
+
+  ws.iconType = nextType;
+  ws.iconValue = nextValue;
+  emit dataChanged(this->index(index), this->index(index), {IconTypeRole, IconValueRole});
 }
 
 int WorkspaceModel::sidebarWidthAt(int index) const

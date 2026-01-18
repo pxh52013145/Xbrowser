@@ -179,6 +179,12 @@ bool SessionStore::restoreNow(QString* error)
     }
     workspaces->setSidebarExpandedAt(wsIndex, wsObj.value("sidebarExpanded").toBool(true));
 
+    const QString iconType = wsObj.value("iconType").toString();
+    const QString iconValue = wsObj.value("iconValue").toString();
+    if (!iconType.trimmed().isEmpty() || !iconValue.trimmed().isEmpty()) {
+      workspaces->setIconAt(wsIndex, iconType, iconValue);
+    }
+
     TabGroupModel* groups = workspaces->groupsForIndex(wsIndex);
     if (groups) {
       groups->clear();
@@ -324,6 +330,8 @@ bool SessionStore::saveNow(QString* error) const
     wsObj.insert("name", workspaces->nameAt(i));
     const QColor accent = workspaces->accentColorAt(i);
     wsObj.insert("accentColor", accent.isValid() ? accent.name(QColor::HexRgb) : QString());
+    wsObj.insert("iconType", workspaces->iconTypeAt(i));
+    wsObj.insert("iconValue", workspaces->iconValueAt(i));
     wsObj.insert("sidebarWidth", workspaces->sidebarWidthAt(i));
     wsObj.insert("sidebarExpanded", workspaces->sidebarExpandedAt(i));
 

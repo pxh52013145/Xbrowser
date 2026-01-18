@@ -382,6 +382,41 @@ Item {
                                     onToggled: if (root.settings) root.settings.closeTabOnBackNoHistory = checked
                                 }
                             }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Drag: hover workspace switches automatically"
+                                    checked: root.settings ? root.settings.dndHoverSwitchWorkspaceEnabled : true
+                                    onToggled: if (root.settings) root.settings.dndHoverSwitchWorkspaceEnabled = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Workspace hover switch delay"
+                                    opacity: 0.85
+                                }
+
+                                SpinBox {
+                                    from: 100
+                                    to: 2000
+                                    stepSize: 50
+                                    editable: true
+                                    value: root.settings ? Number(root.settings.dndHoverSwitchWorkspaceDelayMs || 500) : 500
+                                    enabled: root.settings ? root.settings.dndHoverSwitchWorkspaceEnabled : true
+                                    onValueModified: if (root.settings) root.settings.dndHoverSwitchWorkspaceDelayMs = value
+                                }
+
+                                Label { text: "ms"; opacity: 0.75 }
+                            }
                         }
                     }
 

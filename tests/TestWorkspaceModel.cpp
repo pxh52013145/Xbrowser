@@ -99,6 +99,7 @@ private slots:
 
     workspaces.setSidebarWidthAt(ws0, 300);
     workspaces.setSidebarExpandedAt(ws0, false);
+    workspaces.setIconAt(ws0, QStringLiteral("emoji"), QStringLiteral("A"));
 
     TabGroupModel* groups0 = workspaces.groupsForIndex(ws0);
     QVERIFY(groups0);
@@ -122,6 +123,8 @@ private slots:
     QCOMPARE(workspaces.count(), 2);
     QCOMPARE(workspaces.nameAt(dupIndex), QStringLiteral("Copy of One"));
     QCOMPARE(workspaces.accentColorAt(dupIndex), QColor("#123456"));
+    QCOMPARE(workspaces.iconTypeAt(dupIndex), QStringLiteral("emoji"));
+    QCOMPARE(workspaces.iconValueAt(dupIndex), QStringLiteral("A"));
     QCOMPARE(workspaces.sidebarWidthAt(dupIndex), 300);
     QCOMPARE(workspaces.sidebarExpandedAt(dupIndex), false);
 

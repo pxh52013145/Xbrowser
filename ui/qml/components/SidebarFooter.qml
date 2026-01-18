@@ -14,6 +14,8 @@ Item {
 
     property int renameWorkspaceIndex: -1
     property string renameDraft: ""
+    property string renameIconTypeDraft: ""
+    property string renameIconValueDraft: ""
 
     RowLayout {
         id: row
@@ -62,14 +64,29 @@ Item {
                     border.width: 1
                 }
 
-                Rectangle {
-                    width: 8
-                    height: 8
-                    radius: 3
-                    color: accentColor
+                Item {
+                    width: 18
+                    height: 18
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 8
+
+                    Text {
+                        id: wsIconText
+                        anchors.centerIn: parent
+                        text: iconValue && iconValue.length > 0 ? iconValue : ""
+                        visible: text.length > 0
+                        font.pixelSize: 14
+                    }
+
+                    Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 3
+                        color: accentColor
+                        anchors.centerIn: parent
+                        visible: !wsIconText.visible
+                    }
                 }
 
                 Text {
@@ -77,7 +94,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.leftMargin: 20
+                    anchors.leftMargin: 30
                     anchors.rightMargin: 8
                     text: name
                     elide: Text.ElideRight
@@ -104,11 +121,41 @@ Item {
                     acceptedButtons: Qt.NoButton
                 }
 
+                Timer {
+                    id: hoverSwitchTimer
+                    interval: root.settings ? Number(root.settings.dndHoverSwitchWorkspaceDelayMs || 500) : 500
+                    repeat: false
+                    onTriggered: {
+                        if (!wsDrop.containsDrag) {
+                            return
+                        }
+                        if (!root.settings || !root.settings.dndHoverSwitchWorkspaceEnabled) {
+                            return
+                        }
+                        if (root.workspaces.activeIndex === index) {
+                            return
+                        }
+                        root.workspaces.activeIndex = index
+                    }
+                }
+
                 DropArea {
                     id: wsDrop
                     anchors.fill: parent
                     keys: ["tab"]
+                    onContainsDragChanged: {
+                        if (!root.settings || !root.settings.dndHoverSwitchWorkspaceEnabled) {
+                            hoverSwitchTimer.stop()
+                            return
+                        }
+                        if (containsDrag && root.workspaces.activeIndex !== index) {
+                            hoverSwitchTimer.restart()
+                        } else {
+                            hoverSwitchTimer.stop()
+                        }
+                    }
                     onDropped: (drop) => {
+                        hoverSwitchTimer.stop()
                         const dragged = Number(drop.mimeData.tabId || 0)
                         if (dragged > 0) {
                             root.browser.moveTabToWorkspace(dragged, index)
@@ -217,6 +264,8 @@ Item {
                         }
                         root.renameWorkspaceIndex = root.workspaces.activeIndex
                         root.renameDraft = root.workspaces.nameAt(root.renameWorkspaceIndex)
+                        root.renameIconTypeDraft = root.workspaces.iconTypeAt(root.renameWorkspaceIndex)
+                        root.renameIconValueDraft = root.workspaces.iconValueAt(root.renameWorkspaceIndex)
                         root.popupContextHost.popupManagerContext = "sidebar-workspace-rename"
                         root.popupHost.openAtItem(renameDialogComponent, workspaceMenuButton)
                     }
@@ -290,6 +339,62 @@ Item {
                     Keys.onEscapePressed: root.popupHost.close()
                 }
 
+                Label {
+                    Layout.fillWidth: true
+                    text: "Icon"
+                    opacity: 0.85
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Repeater {
+                        model: ["💼", "🏠", "⭐", "📚", "🧪", "🎨"]
+
+                        delegate: ToolButton {
+                            required property var modelData
+                            text: modelData
+                            onClicked: {
+                                root.renameIconTypeDraft = "builtin"
+                                root.renameIconValueDraft = String(modelData || "")
+                                iconField.text = root.renameIconValueDraft
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Clear"
+                        onClicked: {
+                            root.renameIconTypeDraft = ""
+                            root.renameIconValueDraft = ""
+                            iconField.text = ""
+                        }
+                    }
+                }
+
+                TextField {
+                    id: iconField
+                    Layout.fillWidth: true
+                    selectByMouse: true
+                    placeholderText: "Emoji (e.g., 🚀)"
+
+                    Component.onCompleted: {
+                        text = root.renameIconValueDraft
+                    }
+
+                    onTextChanged: {
+                        const trimmed = text.trim()
+                        root.renameIconTypeDraft = trimmed.length > 0 ? "emoji" : ""
+                        root.renameIconValueDraft = text
+                    }
+
+                    Keys.onReturnPressed: okButton.clicked()
+                    Keys.onEscapePressed: root.popupHost.close()
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: theme.spacing
@@ -310,6 +415,9 @@ Item {
                             const name = root.renameDraft.trim()
                             if (idx >= 0 && name.length > 0) {
                                 root.workspaces.setNameAt(idx, name)
+                                if (root.workspaces.setIconAt) {
+                                    root.workspaces.setIconAt(idx, root.renameIconTypeDraft, root.renameIconValueDraft)
+                                }
                             }
                             root.popupHost.close()
                         }

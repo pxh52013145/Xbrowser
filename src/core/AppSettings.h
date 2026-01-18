@@ -29,6 +29,12 @@ class AppSettings : public QObject
   Q_PROPERTY(qreal defaultZoom READ defaultZoom WRITE setDefaultZoom NOTIFY defaultZoomChanged)
   Q_PROPERTY(
     bool rememberZoomPerSite READ rememberZoomPerSite WRITE setRememberZoomPerSite NOTIFY rememberZoomPerSiteChanged)
+  Q_PROPERTY(
+    bool dndHoverSwitchWorkspaceEnabled READ dndHoverSwitchWorkspaceEnabled WRITE setDndHoverSwitchWorkspaceEnabled NOTIFY
+      dndHoverSwitchWorkspaceEnabledChanged)
+  Q_PROPERTY(
+    int dndHoverSwitchWorkspaceDelayMs READ dndHoverSwitchWorkspaceDelayMs WRITE setDndHoverSwitchWorkspaceDelayMs NOTIFY
+      dndHoverSwitchWorkspaceDelayMsChanged)
   Q_PROPERTY(int webPanelWidth READ webPanelWidth WRITE setWebPanelWidth NOTIFY webPanelWidthChanged)
   Q_PROPERTY(bool webPanelVisible READ webPanelVisible WRITE setWebPanelVisible NOTIFY webPanelVisibleChanged)
   Q_PROPERTY(QUrl webPanelUrl READ webPanelUrl WRITE setWebPanelUrl NOTIFY webPanelUrlChanged)
@@ -85,6 +91,12 @@ public:
   Q_INVOKABLE qreal zoomForUrl(const QUrl& url) const;
   Q_INVOKABLE void setZoomForUrl(const QUrl& url, qreal zoom);
 
+  bool dndHoverSwitchWorkspaceEnabled() const;
+  void setDndHoverSwitchWorkspaceEnabled(bool enabled);
+
+  int dndHoverSwitchWorkspaceDelayMs() const;
+  void setDndHoverSwitchWorkspaceDelayMs(int ms);
+
   int webPanelWidth() const;
   void setWebPanelWidth(int width);
 
@@ -113,6 +125,8 @@ signals:
   void closeTabOnBackNoHistoryChanged();
   void defaultZoomChanged();
   void rememberZoomPerSiteChanged();
+  void dndHoverSwitchWorkspaceEnabledChanged();
+  void dndHoverSwitchWorkspaceDelayMsChanged();
   void webPanelWidthChanged();
   void webPanelVisibleChanged();
   void webPanelUrlChanged();
@@ -139,6 +153,8 @@ private:
   qreal m_defaultZoom = 1.0;
   bool m_rememberZoomPerSite = false;
   QHash<QString, qreal> m_zoomByHost;
+  bool m_dndHoverSwitchWorkspaceEnabled = true;
+  int m_dndHoverSwitchWorkspaceDelayMs = 500;
   int m_webPanelWidth = 360;
   bool m_webPanelVisible = false;
   QUrl m_webPanelUrl = QUrl(QStringLiteral("about:blank"));

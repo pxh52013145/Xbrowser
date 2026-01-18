@@ -316,6 +316,37 @@ void AppSettings::setZoomForUrl(const QUrl& url, qreal zoom)
   scheduleSave();
 }
 
+bool AppSettings::dndHoverSwitchWorkspaceEnabled() const
+{
+  return m_dndHoverSwitchWorkspaceEnabled;
+}
+
+void AppSettings::setDndHoverSwitchWorkspaceEnabled(bool enabled)
+{
+  if (m_dndHoverSwitchWorkspaceEnabled == enabled) {
+    return;
+  }
+  m_dndHoverSwitchWorkspaceEnabled = enabled;
+  emit dndHoverSwitchWorkspaceEnabledChanged();
+  scheduleSave();
+}
+
+int AppSettings::dndHoverSwitchWorkspaceDelayMs() const
+{
+  return m_dndHoverSwitchWorkspaceDelayMs;
+}
+
+void AppSettings::setDndHoverSwitchWorkspaceDelayMs(int ms)
+{
+  const int clamped = qBound(100, ms, 2000);
+  if (m_dndHoverSwitchWorkspaceDelayMs == clamped) {
+    return;
+  }
+  m_dndHoverSwitchWorkspaceDelayMs = clamped;
+  emit dndHoverSwitchWorkspaceDelayMsChanged();
+  scheduleSave();
+}
+
 int AppSettings::webPanelWidth() const
 {
   return m_webPanelWidth;
@@ -417,6 +448,12 @@ void AppSettings::load()
   m_closeTabOnBackNoHistory = obj.value("closeTabOnBackNoHistory").toBool(m_closeTabOnBackNoHistory);
   m_defaultZoom = clampZoomFactor(obj.value("defaultZoom").toDouble(m_defaultZoom));
   m_rememberZoomPerSite = obj.value("rememberZoomPerSite").toBool(m_rememberZoomPerSite);
+  m_dndHoverSwitchWorkspaceEnabled =
+    obj.value("dndHoverSwitchWorkspaceEnabled").toBool(m_dndHoverSwitchWorkspaceEnabled);
+  m_dndHoverSwitchWorkspaceDelayMs = qBound(
+    100,
+    obj.value("dndHoverSwitchWorkspaceDelayMs").toInt(m_dndHoverSwitchWorkspaceDelayMs),
+    2000);
 
   m_zoomByHost.clear();
   const QJsonValue zoomMapValue = obj.value("zoomByHost");
@@ -477,6 +514,8 @@ bool AppSettings::saveNow(QString* error) const
   obj.insert("closeTabOnBackNoHistory", m_closeTabOnBackNoHistory);
   obj.insert("defaultZoom", m_defaultZoom);
   obj.insert("rememberZoomPerSite", m_rememberZoomPerSite);
+  obj.insert("dndHoverSwitchWorkspaceEnabled", m_dndHoverSwitchWorkspaceEnabled);
+  obj.insert("dndHoverSwitchWorkspaceDelayMs", m_dndHoverSwitchWorkspaceDelayMs);
 
   QJsonObject zoomMap;
   for (auto it = m_zoomByHost.constBegin(); it != m_zoomByHost.constEnd(); ++it) {

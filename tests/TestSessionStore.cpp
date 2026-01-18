@@ -37,6 +37,8 @@ private slots:
       browser.workspaces()->setSidebarExpandedAt(ws0, true);
       browser.workspaces()->setSidebarWidthAt(ws1, 320);
       browser.workspaces()->setSidebarExpandedAt(ws1, false);
+      browser.workspaces()->setIconAt(ws0, QStringLiteral("emoji"), QStringLiteral("A"));
+      browser.workspaces()->setIconAt(ws1, QStringLiteral("builtin"), QStringLiteral("B"));
 
       // Workspace 0
       {
@@ -105,6 +107,10 @@ private slots:
       QCOMPARE(browser.workspaces()->sidebarExpandedAt(0), true);
       QCOMPARE(browser.workspaces()->sidebarWidthAt(1), 320);
       QCOMPARE(browser.workspaces()->sidebarExpandedAt(1), false);
+      QCOMPARE(browser.workspaces()->iconTypeAt(0), QStringLiteral("emoji"));
+      QCOMPARE(browser.workspaces()->iconValueAt(0), QStringLiteral("A"));
+      QCOMPARE(browser.workspaces()->iconTypeAt(1), QStringLiteral("builtin"));
+      QCOMPARE(browser.workspaces()->iconValueAt(1), QStringLiteral("B"));
 
       TabGroupModel* groups = browser.workspaces()->groupsForIndex(0);
       QVERIFY(groups);
