@@ -196,3 +196,6 @@ if ($CMakeArgs) {
 
 Write-Host "Configuring (CMake)..." -ForegroundColor Cyan
 & cmake @args
+if ($LASTEXITCODE -ne 0) {
+  throw "CMake configure failed with exit code $LASTEXITCODE."
+}

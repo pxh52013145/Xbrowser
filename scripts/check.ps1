@@ -29,6 +29,9 @@ if (!(Test-Path $buildDir)) {
 
 Write-Host "Building ($Config)..." -ForegroundColor Cyan
 cmake --build $buildDir --config $Config
+if ($LASTEXITCODE -ne 0) {
+  throw "Build failed with exit code $LASTEXITCODE (close xbrowser.exe if it is running, then retry)."
+}
 
 Write-Host "Running tests ($Config)..." -ForegroundColor Cyan
 Push-Location $buildDir
