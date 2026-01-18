@@ -22,6 +22,8 @@ class AppSettings : public QObject
     QString lastSeenAppVersion READ lastSeenAppVersion WRITE setLastSeenAppVersion NOTIFY lastSeenAppVersionChanged)
   Q_PROPERTY(QString themeId READ themeId WRITE setThemeId NOTIFY themeIdChanged)
   Q_PROPERTY(bool onboardingSeen READ onboardingSeen WRITE setOnboardingSeen NOTIFY onboardingSeenChanged)
+  Q_PROPERTY(
+    bool firstRunCompleted READ firstRunCompleted WRITE setFirstRunCompleted NOTIFY firstRunCompletedChanged)
   Q_PROPERTY(bool showMenuBar READ showMenuBar WRITE setShowMenuBar NOTIFY showMenuBarChanged)
   Q_PROPERTY(
     bool closeTabOnBackNoHistory READ closeTabOnBackNoHistory WRITE setCloseTabOnBackNoHistory NOTIFY
@@ -76,6 +78,9 @@ public:
   bool onboardingSeen() const;
   void setOnboardingSeen(bool seen);
 
+  bool firstRunCompleted() const;
+  void setFirstRunCompleted(bool completed);
+
   bool showMenuBar() const;
   void setShowMenuBar(bool show);
 
@@ -121,6 +126,7 @@ signals:
   void lastSeenAppVersionChanged();
   void themeIdChanged();
   void onboardingSeenChanged();
+  void firstRunCompletedChanged();
   void showMenuBarChanged();
   void closeTabOnBackNoHistoryChanged();
   void defaultZoomChanged();

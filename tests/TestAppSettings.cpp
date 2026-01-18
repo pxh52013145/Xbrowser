@@ -20,7 +20,7 @@ private slots:
 
     AppSettings settings;
     settings.setLastSeenAppVersion("1.2.3");
-    settings.setOnboardingSeen(true);
+    settings.setFirstRunCompleted(true);
     settings.setShowMenuBar(true);
     settings.setSidebarOnRight(true);
     settings.setUseSingleToolbar(true);
@@ -43,6 +43,7 @@ private slots:
     QCOMPARE(obj.value("version").toInt(), 6);
     QCOMPARE(obj.value("lastSeenAppVersion").toString(), QStringLiteral("1.2.3"));
     QCOMPARE(obj.value("onboardingSeen").toBool(), true);
+    QCOMPARE(obj.value("firstRunCompleted").toBool(), true);
     QCOMPARE(obj.value("showMenuBar").toBool(), true);
     QCOMPARE(obj.value("sidebarOnRight").toBool(), true);
     QCOMPARE(obj.value("useSingleToolbar").toBool(), true);
@@ -65,6 +66,8 @@ private slots:
     QVERIFY(qAbs(reload.defaultZoom() - 1.1) < 0.0001);
     QCOMPARE(reload.rememberZoomPerSite(), true);
     QVERIFY(qAbs(reload.zoomForUrl(QUrl(QStringLiteral("https://example.com/test"))) - 1.25) < 0.0001);
+    QCOMPARE(reload.onboardingSeen(), true);
+    QCOMPARE(reload.firstRunCompleted(), true);
     QCOMPARE(reload.dndHoverSwitchWorkspaceEnabled(), false);
     QCOMPARE(reload.dndHoverSwitchWorkspaceDelayMs(), 650);
   }

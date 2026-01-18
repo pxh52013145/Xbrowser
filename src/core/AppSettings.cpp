@@ -211,7 +211,18 @@ void AppSettings::setOnboardingSeen(bool seen)
   }
   m_onboardingSeen = seen;
   emit onboardingSeenChanged();
+  emit firstRunCompletedChanged();
   scheduleSave();
+}
+
+bool AppSettings::firstRunCompleted() const
+{
+  return m_onboardingSeen;
+}
+
+void AppSettings::setFirstRunCompleted(bool completed)
+{
+  setOnboardingSeen(completed);
 }
 
 bool AppSettings::showMenuBar() const
@@ -443,7 +454,8 @@ void AppSettings::load()
   if (m_themeId.isEmpty()) {
     m_themeId = QStringLiteral("workspace");
   }
-  m_onboardingSeen = obj.value("onboardingSeen").toBool(m_onboardingSeen);
+  const bool onboardingSeen = obj.value("onboardingSeen").toBool(m_onboardingSeen);
+  m_onboardingSeen = obj.value("firstRunCompleted").toBool(onboardingSeen);
   m_showMenuBar = obj.value("showMenuBar").toBool(m_showMenuBar);
   m_closeTabOnBackNoHistory = obj.value("closeTabOnBackNoHistory").toBool(m_closeTabOnBackNoHistory);
   m_defaultZoom = clampZoomFactor(obj.value("defaultZoom").toDouble(m_defaultZoom));
@@ -510,6 +522,7 @@ bool AppSettings::saveNow(QString* error) const
   obj.insert("lastSeenAppVersion", m_lastSeenAppVersion);
   obj.insert("themeId", m_themeId);
   obj.insert("onboardingSeen", m_onboardingSeen);
+  obj.insert("firstRunCompleted", m_onboardingSeen);
   obj.insert("showMenuBar", m_showMenuBar);
   obj.insert("closeTabOnBackNoHistory", m_closeTabOnBackNoHistory);
   obj.insert("defaultZoom", m_defaultZoom);
