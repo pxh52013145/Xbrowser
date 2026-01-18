@@ -13,6 +13,7 @@ qt_add_executable(xbrowser
   core/DownloadModel.cpp
   core/ExtensionsFilterModel.cpp
   core/ExtensionsStore.cpp
+  core/FaviconCache.cpp
   core/HistoryFilterModel.cpp
   core/HistoryStore.cpp
   core/LayoutController.cpp

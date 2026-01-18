@@ -32,6 +32,7 @@
 #include "../core/DownloadModel.h"
 #include "../core/ExtensionsStore.h"
 #include "../core/ExtensionsFilterModel.h"
+#include "../core/FaviconCache.h"
 #include "../core/HistoryFilterModel.h"
 #include "../core/HistoryStore.h"
 #include "../core/LayoutController.h"
@@ -365,6 +366,7 @@ int main(int argc, char* argv[])
   LayoutController layoutController;
   layoutController.setSettings(browser.settings());
   OmniboxUtils omniboxUtils;
+  FaviconCache favicons;
   CommandBus commands;
   ShortcutStore shortcutStore;
   NotificationCenter notifications;
@@ -762,6 +764,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("webPanels", &webPanels);
   engine.rootContext()->setContextProperty("layoutController", &layoutController);
   engine.rootContext()->setContextProperty("omniboxUtils", &omniboxUtils);
+  engine.rootContext()->setContextProperty("faviconCache", &favicons);
   engine.rootContext()->setContextProperty("mods", &mods);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("themes", &themes);

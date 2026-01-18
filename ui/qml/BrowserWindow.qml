@@ -1689,6 +1689,8 @@ ApplicationWindow {
 
         const parsed = interpretOmniboxInput(trimmed)
         const navTitle = parsed.kind === "search" ? ("Search: " + parsed.display) : ("Go to: " + parsed.display)
+        const navFaviconKey = faviconCache ? faviconCache.faviconKeyForUrl(parsed.url, 32) : ""
+        const navFaviconUrl = faviconCache ? faviconCache.faviconUrlFor(parsed.url, 32) : ""
         omniboxModel.append({ type: "header", title: parsed.kind === "search" ? "Search" : "Navigate" })
         omniboxModel.append({
             type: "item",
@@ -1696,6 +1698,8 @@ ApplicationWindow {
             title: navTitle,
             subtitle: parsed.kind === "search" ? parsed.url : parsed.display,
             url: parsed.url,
+            faviconKey: navFaviconKey,
+            faviconUrl: navFaviconUrl,
             shortcut: "",
             matchStart: -1,
             matchLength: 0,
@@ -1742,12 +1746,16 @@ ApplicationWindow {
         if (bookmarkHits && bookmarkHits.length > 0) {
             omniboxModel.append({ type: "header", title: "Bookmarks" })
             for (const b of bookmarkHits) {
+                const faviconKey = faviconCache ? faviconCache.faviconKeyForUrl(b.url, 32) : ""
+                const faviconUrl = faviconCache ? faviconCache.faviconUrlFor(b.url, 32) : ""
                 omniboxModel.append({
                     type: "item",
                     kind: "bookmark",
                     title: b.title,
                     subtitle: b.subtitle,
                     url: b.url,
+                    faviconKey: faviconKey,
+                    faviconUrl: faviconUrl,
                     shortcut: "",
                     matchStart: b.matchStart,
                     matchLength: b.matchLength,
@@ -1759,12 +1767,16 @@ ApplicationWindow {
         if (historyHits && historyHits.length > 0) {
             omniboxModel.append({ type: "header", title: "History" })
             for (const h of historyHits) {
+                const faviconKey = faviconCache ? faviconCache.faviconKeyForUrl(h.url, 32) : ""
+                const faviconUrl = faviconCache ? faviconCache.faviconUrlFor(h.url, 32) : ""
                 omniboxModel.append({
                     type: "item",
                     kind: "history",
                     title: h.title,
                     subtitle: h.subtitle,
                     url: h.url,
+                    faviconKey: faviconKey,
+                    faviconUrl: faviconUrl,
                     shortcut: "",
                     matchStart: h.matchStart,
                     matchLength: h.matchLength,
@@ -3127,25 +3139,48 @@ ApplicationWindow {
                 return
             }
 
-            omniboxModel.append({ type: "header", title: "Web Suggestions", group: "web-suggestions" })
-            for (const s of suggestions) {
-                const text = String(s || "").trim()
-                if (!text) {
-                    continue
-                }
+             omniboxModel.append({ type: "header", title: "Web Suggestions", group: "web-suggestions" })
+             for (const s of suggestions) {
+                 const text = String(s || "").trim()
+                 if (!text) {
+                     continue
+                 }
 
-                const range = omniboxUtils.matchRange(currentQuery, text)
-                omniboxModel.append({
-                    type: "item",
-                    kind: "search",
-                    title: text,
-                    subtitle: "",
-                    url: "https://duckduckgo.com/?q=" + encodeURIComponent(text),
-                    group: "web-suggestions",
-                    shortcut: "",
-                    matchStart: range.start,
-                    matchLength: range.length,
-                })
+                 const range = omniboxUtils.matchRange(currentQuery, text)
+                 const url = "https://duckduckgo.com/?q=" + encodeURIComponent(text)
+                 const faviconKey = faviconCache ? faviconCache.faviconKeyForUrl(url, 32) : ""
+                 const faviconUrl = faviconCache ? faviconCache.faviconUrlFor(url, 32) : ""
+                 omniboxModel.append({
+                     type: "item",
+                     kind: "search",
+                     title: text,
+                     subtitle: "",
+                     url: url,
+                     faviconKey: faviconKey,
+                     faviconUrl: faviconUrl,
+                     group: "web-suggestions",
+                     shortcut: "",
+                     matchStart: range.start,
+                     matchLength: range.length,
+                 })
+             }
+        }
+    }
+
+    Connections {
+        target: faviconCache
+
+        function onFaviconAvailable(key, faviconUrl) {
+            const k = String(key || "")
+            if (!k || !faviconUrl || faviconUrl.toString().length === 0) {
+                return
+            }
+
+            for (let i = 0; i < omniboxModel.count; i++) {
+                const item = omniboxModel.get(i)
+                if (item && item.faviconKey === k) {
+                    omniboxModel.setProperty(i, "faviconUrl", faviconUrl)
+                }
             }
         }
     }
@@ -3375,11 +3410,11 @@ ApplicationWindow {
                             Layout.preferredHeight: 22
                             visible: type !== "header"
 
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: 6
-                                color: Qt.rgba(0, 0, 0, 0.06)
-                                visible: !(kind === "tab" && faviconUrl && faviconUrl.toString().length > 0)
+                             Rectangle {
+                                 anchors.fill: parent
+                                 radius: 6
+                                 color: Qt.rgba(0, 0, 0, 0.06)
+                                 visible: !(faviconUrl && faviconUrl.toString().length > 0)
 
                                      Text {
                                          anchors.centerIn: parent
@@ -3400,15 +3435,15 @@ ApplicationWindow {
                                      }
                                  }
 
-                            Image {
-                                anchors.fill: parent
-                                source: faviconUrl
-                                asynchronous: true
-                                cache: true
-                                fillMode: Image.PreserveAspectFit
-                                visible: kind === "tab" && faviconUrl && faviconUrl.toString().length > 0
-                            }
-                        }
+                             Image {
+                                 anchors.fill: parent
+                                 source: faviconUrl
+                                 asynchronous: true
+                                 cache: true
+                                 fillMode: Image.PreserveAspectFit
+                                 visible: faviconUrl && faviconUrl.toString().length > 0
+                             }
+                         }
 
                         ColumnLayout {
                             Layout.fillWidth: true
