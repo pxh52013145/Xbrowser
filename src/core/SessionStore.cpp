@@ -26,7 +26,11 @@ QString sessionPath()
 
 QColor parseColor(const QJsonValue& value)
 {
-  const QString s = value.toString();
+  const QString s = value.toString().trimmed();
+  if (s.isEmpty()) {
+    return {};
+  }
+
   const QColor c(s);
   return c.isValid() ? c : QColor();
 }
@@ -185,6 +189,19 @@ bool SessionStore::restoreNow(QString* error)
       workspaces->setIconAt(wsIndex, iconType, iconValue);
     }
 
+    const QColor bgFrom = parseColor(wsObj.value("backgroundFrom"));
+    const QColor bgMid = parseColor(wsObj.value("backgroundMid"));
+    const QColor bgTo = parseColor(wsObj.value("backgroundTo"));
+    const int bgAngle = wsObj.value("backgroundAngle").toInt(0);
+    const int bgStrength = wsObj.value("backgroundStrength").toInt(20);
+    if (bgFrom.isValid() && bgTo.isValid()) {
+      if (bgMid.isValid()) {
+        workspaces->setBackgroundGradient3At(wsIndex, bgFrom, bgMid, bgTo, bgAngle, bgStrength);
+      } else {
+        workspaces->setBackgroundGradient2At(wsIndex, bgFrom, bgTo, bgAngle, bgStrength);
+      }
+    }
+
     TabGroupModel* groups = workspaces->groupsForIndex(wsIndex);
     if (groups) {
       groups->clear();
@@ -330,6 +347,14 @@ bool SessionStore::saveNow(QString* error) const
     wsObj.insert("name", workspaces->nameAt(i));
     const QColor accent = workspaces->accentColorAt(i);
     wsObj.insert("accentColor", accent.isValid() ? accent.name(QColor::HexRgb) : QString());
+    const QColor bgFrom = workspaces->backgroundFromAt(i);
+    const QColor bgMid = workspaces->backgroundMidAt(i);
+    const QColor bgTo = workspaces->backgroundToAt(i);
+    wsObj.insert("backgroundFrom", bgFrom.isValid() ? bgFrom.name(QColor::HexRgb) : QString());
+    wsObj.insert("backgroundMid", workspaces->hasCustomBackgroundMidAt(i) ? bgMid.name(QColor::HexRgb) : QString());
+    wsObj.insert("backgroundTo", bgTo.isValid() ? bgTo.name(QColor::HexRgb) : QString());
+    wsObj.insert("backgroundAngle", workspaces->backgroundAngleAt(i));
+    wsObj.insert("backgroundStrength", workspaces->backgroundStrengthAt(i));
     wsObj.insert("iconType", workspaces->iconTypeAt(i));
     wsObj.insert("iconValue", workspaces->iconValueAt(i));
     wsObj.insert("sidebarWidth", workspaces->sidebarWidthAt(i));

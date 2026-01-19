@@ -1,6 +1,7 @@
 #include "BrowserController.h"
 
 #include <QDateTime>
+#include <QSet>
 #include <QVariant>
 
 BrowserController::BrowserController(QObject* parent)
@@ -297,6 +298,148 @@ void BrowserController::moveTabAfter(int tabId, int afterTabId)
 
   const int toIndex = fromIndex < afterIndex ? afterIndex : afterIndex + 1;
   model->moveTab(fromIndex, toIndex);
+}
+
+void BrowserController::moveTabsBefore(const QVariantList& tabIds, int beforeTabId)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  QSet<int> requested;
+  requested.reserve(tabIds.size());
+  for (const QVariant& v : tabIds) {
+    bool ok = false;
+    const int id = v.toInt(&ok);
+    if (!ok || id <= 0) {
+      continue;
+    }
+    requested.insert(id);
+  }
+
+  if (requested.isEmpty()) {
+    return;
+  }
+  if (requested.size() == 1) {
+    moveTabBefore(*requested.begin(), beforeTabId);
+    return;
+  }
+
+  const int beforeIndex = model->indexOfTabId(beforeTabId);
+  if (beforeIndex < 0) {
+    return;
+  }
+  if (requested.contains(beforeTabId)) {
+    return;
+  }
+
+  const int targetGroupId = model->groupIdAt(beforeIndex);
+  const bool targetEssential = model->isEssentialAt(beforeIndex);
+
+  QVector<int> ordered;
+  ordered.reserve(requested.size());
+  for (int i = 0; i < model->count(); ++i) {
+    const int id = model->tabIdAt(i);
+    if (requested.contains(id)) {
+      ordered.push_back(id);
+    }
+  }
+
+  if (ordered.size() <= 1) {
+    if (ordered.size() == 1) {
+      moveTabBefore(ordered.front(), beforeTabId);
+    }
+    return;
+  }
+
+  for (const int id : ordered) {
+    const int index = model->indexOfTabId(id);
+    if (index < 0) {
+      return;
+    }
+    if (model->groupIdAt(index) != targetGroupId) {
+      return;
+    }
+    if (model->isEssentialAt(index) != targetEssential) {
+      return;
+    }
+  }
+
+  for (const int id : ordered) {
+    moveTabBefore(id, beforeTabId);
+  }
+}
+
+void BrowserController::moveTabsAfter(const QVariantList& tabIds, int afterTabId)
+{
+  TabModel* model = tabs();
+  if (!model) {
+    return;
+  }
+
+  QSet<int> requested;
+  requested.reserve(tabIds.size());
+  for (const QVariant& v : tabIds) {
+    bool ok = false;
+    const int id = v.toInt(&ok);
+    if (!ok || id <= 0) {
+      continue;
+    }
+    requested.insert(id);
+  }
+
+  if (requested.isEmpty()) {
+    return;
+  }
+  if (requested.size() == 1) {
+    moveTabAfter(*requested.begin(), afterTabId);
+    return;
+  }
+
+  const int afterIndex = model->indexOfTabId(afterTabId);
+  if (afterIndex < 0) {
+    return;
+  }
+  if (requested.contains(afterTabId)) {
+    return;
+  }
+
+  const int targetGroupId = model->groupIdAt(afterIndex);
+  const bool targetEssential = model->isEssentialAt(afterIndex);
+
+  QVector<int> ordered;
+  ordered.reserve(requested.size());
+  for (int i = 0; i < model->count(); ++i) {
+    const int id = model->tabIdAt(i);
+    if (requested.contains(id)) {
+      ordered.push_back(id);
+    }
+  }
+
+  if (ordered.size() <= 1) {
+    if (ordered.size() == 1) {
+      moveTabAfter(ordered.front(), afterTabId);
+    }
+    return;
+  }
+
+  for (const int id : ordered) {
+    const int index = model->indexOfTabId(id);
+    if (index < 0) {
+      return;
+    }
+    if (model->groupIdAt(index) != targetGroupId) {
+      return;
+    }
+    if (model->isEssentialAt(index) != targetEssential) {
+      return;
+    }
+  }
+
+  for (int i = ordered.size() - 1; i >= 0; --i) {
+    moveTabAfter(ordered[i], afterTabId);
+  }
 }
 
 bool BrowserController::handleBackRequested(int tabId, bool canGoBack)
@@ -606,4 +749,56 @@ void BrowserController::moveTabToWorkspace(int tabId, int workspaceIndex)
   toTabs->setActiveIndex(toIndex);
 
   fromTabs->removeTab(fromIndex);
+}
+
+void BrowserController::moveTabsToWorkspace(const QVariantList& tabIds, int workspaceIndex)
+{
+  if (workspaceIndex < 0 || workspaceIndex >= m_workspaces.count()) {
+    return;
+  }
+
+  TabModel* fromTabs = tabs();
+  TabModel* toTabs = m_workspaces.tabsForIndex(workspaceIndex);
+  if (!fromTabs || !toTabs || fromTabs == toTabs) {
+    return;
+  }
+
+  QSet<int> requested;
+  requested.reserve(tabIds.size());
+  for (const QVariant& v : tabIds) {
+    bool ok = false;
+    const int id = v.toInt(&ok);
+    if (!ok || id <= 0) {
+      continue;
+    }
+    requested.insert(id);
+  }
+
+  if (requested.isEmpty()) {
+    return;
+  }
+  if (requested.size() == 1) {
+    moveTabToWorkspace(*requested.begin(), workspaceIndex);
+    return;
+  }
+
+  QVector<int> ordered;
+  ordered.reserve(requested.size());
+  for (int i = 0; i < fromTabs->count(); ++i) {
+    const int id = fromTabs->tabIdAt(i);
+    if (requested.contains(id)) {
+      ordered.push_back(id);
+    }
+  }
+
+  if (ordered.size() <= 1) {
+    if (ordered.size() == 1) {
+      moveTabToWorkspace(ordered.front(), workspaceIndex);
+    }
+    return;
+  }
+
+  for (const int id : ordered) {
+    moveTabToWorkspace(id, workspaceIndex);
+  }
 }

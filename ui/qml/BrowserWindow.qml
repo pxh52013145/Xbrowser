@@ -7,6 +7,7 @@ import Qt.labs.platform as Platform
 
 import XBrowser 1.0
 import "components"
+import "components/Downloads" as Downloads
 
 ApplicationWindow {
     id: root
@@ -165,10 +166,20 @@ ApplicationWindow {
         syncExtensionsHost()
     }
 
-    background: Rectangle {
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: theme.backgroundFrom }
-            GradientStop { position: 1.0; color: theme.backgroundTo }
+    background: Item {
+        clip: true
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.ceil(Math.sqrt(parent.width * parent.width + parent.height * parent.height))
+            height: width
+            rotation: theme.backgroundAngle
+
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: theme.backgroundFrom }
+                GradientStop { position: 0.5; color: theme.backgroundMid }
+                GradientStop { position: 1.0; color: theme.backgroundTo }
+            }
         }
     }
 
@@ -1185,6 +1196,39 @@ ApplicationWindow {
         if (!browser.tabs.isSelectedById(resolved)) {
             browser.tabs.selectOnlyById(resolved)
         }
+    }
+
+    function dragTabIdsForModel(filterModel, tabId) {
+        if (!browser.tabs || !browser.tabs.selectedTabIds || !browser.tabs.isSelectedById) {
+            return [Number(tabId || 0)]
+        }
+
+        const resolvedTabId = Number(tabId || 0)
+        if (resolvedTabId <= 0) {
+            return []
+        }
+
+        const selectedCount = Number(browser.tabs.selectedCount || 0)
+        if (selectedCount <= 1 || !browser.tabs.isSelectedById(resolvedTabId)) {
+            return [resolvedTabId]
+        }
+
+        const selected = browser.tabs.selectedTabIds ? browser.tabs.selectedTabIds() : []
+        if (!filterModel || !filterModel.tabIds) {
+            return selected.map(v => Number(v || 0)).filter(v => v > 0)
+        }
+
+        const allowed = filterModel.tabIds ? filterModel.tabIds() : []
+        const allowSet = new Set(allowed.map(v => Number(v || 0)).filter(v => v > 0))
+        const filtered = []
+        for (const v of selected) {
+            const id = Number(v || 0)
+            if (id > 0 && allowSet.has(id)) {
+                filtered.push(id)
+            }
+        }
+
+        return filtered.length > 0 ? filtered : [resolvedTabId]
     }
 
     function handleTabRowClick(listView, model, index, tabId, modifiers, activateOnPlainClick) {
@@ -3824,6 +3868,14 @@ ApplicationWindow {
                             color: buttonColor(root.popupManagerContext === "sidebar-tool-downloads")
                             border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-downloads")
                             border.width: 1
+
+                            Downloads.DownloadAnimation {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 3
+                                downloads: root.downloadsModel
+                                reduceMotion: browser.settings.reduceMotion
+                            }
                         }
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
@@ -4756,7 +4808,7 @@ ApplicationWindow {
                                 Drag.hotSpot.x: width / 2
                                 Drag.hotSpot.y: height / 2
                                 Drag.keys: ["tab"]
-                                Drag.mimeData: ({ tabId: tabId })
+                                Drag.mimeData: ({ tabId: tabId, tabIds: root.dragTabIdsForModel(groupTabs, tabId) })
                                 Drag.supportedActions: Qt.MoveAction
 
                                 TapHandler {
@@ -4809,13 +4861,35 @@ ApplicationWindow {
                                     keys: ["tab"]
                                     onPositionChanged: (drag) => dropAfter = drag.y > height * 0.5
                                     onDropped: (drop) => {
-                                        const dragged = Number(drop.mimeData.tabId || 0)
-                                        if (dragged > 0 && dragged !== tabId) {
+                                        let draggedIds = drop.mimeData.tabIds || []
+                                        draggedIds = draggedIds.map(v => Number(v || 0)).filter(v => v > 0)
+                                        if (draggedIds.length === 0) {
+                                            const dragged = Number(drop.mimeData.tabId || 0)
+                                            if (dragged > 0) {
+                                                draggedIds = [dragged]
+                                            }
+                                        }
+                                        if (draggedIds.length === 0) {
+                                            return
+                                        }
+                                        if (draggedIds.indexOf(tabId) >= 0) {
+                                            return
+                                        }
+
+                                        if (draggedIds.length === 1) {
+                                            const dragged = draggedIds[0]
                                             if (dropAfter) {
                                                 browser.moveTabAfter(dragged, tabId)
                                             } else {
                                                 browser.moveTabBefore(dragged, tabId)
                                             }
+                                            return
+                                        }
+
+                                        if (dropAfter) {
+                                            browser.moveTabsAfter(draggedIds, tabId)
+                                        } else {
+                                            browser.moveTabsBefore(draggedIds, tabId)
                                         }
                                     }
                                 }
@@ -5156,7 +5230,7 @@ ApplicationWindow {
                         Drag.hotSpot.x: width / 2
                         Drag.hotSpot.y: height / 2
                         Drag.keys: ["tab"]
-                        Drag.mimeData: ({ tabId: tabId })
+                        Drag.mimeData: ({ tabId: tabId, tabIds: root.dragTabIdsForModel(regularTabs, tabId) })
                         Drag.supportedActions: Qt.MoveAction
 
                         function finishRename() {
@@ -5229,13 +5303,35 @@ ApplicationWindow {
                             keys: ["tab"]
                             onPositionChanged: (drag) => dropAfter = drag.y > height * 0.5
                             onDropped: (drop) => {
-                                const dragged = Number(drop.mimeData.tabId || 0)
-                                if (dragged > 0 && dragged !== tabId) {
+                                let draggedIds = drop.mimeData.tabIds || []
+                                draggedIds = draggedIds.map(v => Number(v || 0)).filter(v => v > 0)
+                                if (draggedIds.length === 0) {
+                                    const dragged = Number(drop.mimeData.tabId || 0)
+                                    if (dragged > 0) {
+                                        draggedIds = [dragged]
+                                    }
+                                }
+                                if (draggedIds.length === 0) {
+                                    return
+                                }
+                                if (draggedIds.indexOf(tabId) >= 0) {
+                                    return
+                                }
+
+                                if (draggedIds.length === 1) {
+                                    const dragged = draggedIds[0]
                                     if (dropAfter) {
                                         browser.moveTabAfter(dragged, tabId)
                                     } else {
                                         browser.moveTabBefore(dragged, tabId)
                                     }
+                                    return
+                                }
+
+                                if (dropAfter) {
+                                    browser.moveTabsAfter(draggedIds, tabId)
+                                } else {
+                                    browser.moveTabsBefore(draggedIds, tabId)
                                 }
                             }
                         }

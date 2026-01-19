@@ -17,6 +17,11 @@ public:
     WorkspaceIdRole = Qt::UserRole + 1,
     NameRole,
     AccentColorRole,
+    BackgroundFromRole,
+    BackgroundMidRole,
+    BackgroundToRole,
+    BackgroundAngleRole,
+    BackgroundStrengthRole,
     IconTypeRole,
     IconValueRole,
     IsActiveRole,
@@ -49,6 +54,17 @@ public:
   Q_INVOKABLE QColor accentColorAt(int index) const;
   Q_INVOKABLE void setAccentColorAt(int index, const QColor& color);
 
+  Q_INVOKABLE bool hasCustomBackgroundAt(int index) const;
+  Q_INVOKABLE bool hasCustomBackgroundMidAt(int index) const;
+  Q_INVOKABLE QColor backgroundFromAt(int index) const;
+  Q_INVOKABLE QColor backgroundMidAt(int index) const;
+  Q_INVOKABLE QColor backgroundToAt(int index) const;
+  Q_INVOKABLE int backgroundAngleAt(int index) const;
+  Q_INVOKABLE int backgroundStrengthAt(int index) const;
+  Q_INVOKABLE void setBackgroundGradient2At(int index, const QColor& from, const QColor& to, int angle, int strength);
+  Q_INVOKABLE void setBackgroundGradient3At(int index, const QColor& from, const QColor& mid, const QColor& to, int angle, int strength);
+  Q_INVOKABLE void clearBackgroundGradientAt(int index);
+
   Q_INVOKABLE QString iconTypeAt(int index) const;
   Q_INVOKABLE QString iconValueAt(int index) const;
   Q_INVOKABLE void setIconAt(int index, const QString& type, const QString& value);
@@ -73,6 +89,12 @@ private:
     int id = 0;
     QString name;
     QColor accentColor;
+    QColor backgroundFrom;
+    QColor backgroundMid;
+    bool backgroundHasMid = false;
+    QColor backgroundTo;
+    int backgroundAngle = 0;
+    int backgroundStrength = 20;
     QString iconType;
     QString iconValue;
     int sidebarWidth = 260;

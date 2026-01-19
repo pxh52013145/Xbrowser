@@ -100,6 +100,7 @@ private slots:
     workspaces.setSidebarWidthAt(ws0, 300);
     workspaces.setSidebarExpandedAt(ws0, false);
     workspaces.setIconAt(ws0, QStringLiteral("emoji"), QStringLiteral("A"));
+    workspaces.setBackgroundGradient3At(ws0, QColor("#112233"), QColor("#334455"), QColor("#556677"), 33, 70);
 
     TabGroupModel* groups0 = workspaces.groupsForIndex(ws0);
     QVERIFY(groups0);
@@ -125,6 +126,11 @@ private slots:
     QCOMPARE(workspaces.accentColorAt(dupIndex), QColor("#123456"));
     QCOMPARE(workspaces.iconTypeAt(dupIndex), QStringLiteral("emoji"));
     QCOMPARE(workspaces.iconValueAt(dupIndex), QStringLiteral("A"));
+    QCOMPARE(workspaces.backgroundFromAt(dupIndex), QColor("#112233"));
+    QCOMPARE(workspaces.backgroundMidAt(dupIndex), QColor("#334455"));
+    QCOMPARE(workspaces.backgroundToAt(dupIndex), QColor("#556677"));
+    QCOMPARE(workspaces.backgroundAngleAt(dupIndex), 33);
+    QCOMPARE(workspaces.backgroundStrengthAt(dupIndex), 70);
     QCOMPARE(workspaces.sidebarWidthAt(dupIndex), 300);
     QCOMPARE(workspaces.sidebarExpandedAt(dupIndex), false);
 

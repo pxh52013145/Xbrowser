@@ -39,6 +39,10 @@ private slots:
       browser.workspaces()->setSidebarExpandedAt(ws1, false);
       browser.workspaces()->setIconAt(ws0, QStringLiteral("emoji"), QStringLiteral("A"));
       browser.workspaces()->setIconAt(ws1, QStringLiteral("builtin"), QStringLiteral("B"));
+      browser.workspaces()->setBackgroundGradient2At(ws0, QColor("#112233"), QColor("#445566"), 45, 80);
+      browser.workspaces()->setBackgroundGradient3At(ws1, QColor("#010203"), QColor("#040506"), QColor("#070809"), 120, 100);
+      QCOMPARE(browser.workspaces()->hasCustomBackgroundMidAt(ws0), false);
+      QCOMPARE(browser.workspaces()->hasCustomBackgroundMidAt(ws1), true);
 
       // Workspace 0
       {
@@ -113,6 +117,17 @@ private slots:
       QCOMPARE(browser.workspaces()->iconValueAt(0), QStringLiteral("A"));
       QCOMPARE(browser.workspaces()->iconTypeAt(1), QStringLiteral("builtin"));
       QCOMPARE(browser.workspaces()->iconValueAt(1), QStringLiteral("B"));
+      QCOMPARE(browser.workspaces()->backgroundFromAt(0), QColor("#112233"));
+      QCOMPARE(browser.workspaces()->backgroundToAt(0), QColor("#445566"));
+      QCOMPARE(browser.workspaces()->hasCustomBackgroundMidAt(0), false);
+      QCOMPARE(browser.workspaces()->backgroundAngleAt(0), 45);
+      QCOMPARE(browser.workspaces()->backgroundStrengthAt(0), 80);
+      QCOMPARE(browser.workspaces()->backgroundFromAt(1), QColor("#010203"));
+      QCOMPARE(browser.workspaces()->backgroundMidAt(1), QColor("#040506"));
+      QCOMPARE(browser.workspaces()->backgroundToAt(1), QColor("#070809"));
+      QCOMPARE(browser.workspaces()->hasCustomBackgroundMidAt(1), true);
+      QCOMPARE(browser.workspaces()->backgroundAngleAt(1), 120);
+      QCOMPARE(browser.workspaces()->backgroundStrengthAt(1), 100);
 
       TabGroupModel* groups = browser.workspaces()->groupsForIndex(0);
       QVERIFY(groups);

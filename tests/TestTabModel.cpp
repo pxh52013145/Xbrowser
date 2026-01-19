@@ -158,6 +158,62 @@ private slots:
     QCOMPARE(model.activeIndex(), 0);
   }
 
+  void moveTabsAfter_movesMultipleTabsAsGroup()
+  {
+    BrowserController browser;
+    TabModel* tabs = browser.tabs();
+    QVERIFY(tabs);
+
+    tabs->clear();
+    tabs->addTabWithId(1, QUrl("https://a.example"), "A", false);
+    tabs->addTabWithId(2, QUrl("https://b.example"), "B", false);
+    tabs->addTabWithId(3, QUrl("https://c.example"), "C", false);
+    tabs->addTabWithId(4, QUrl("https://d.example"), "D", false);
+    tabs->addTabWithId(5, QUrl("https://e.example"), "E", false);
+    tabs->addTabWithId(6, QUrl("https://f.example"), "F", false);
+
+    QVariantList ids;
+    ids << 2 << 4;
+    browser.moveTabsAfter(ids, 5);
+
+    QCOMPARE(tabs->tabIdAt(0), 1);
+    QCOMPARE(tabs->tabIdAt(1), 3);
+    QCOMPARE(tabs->tabIdAt(2), 5);
+    QCOMPARE(tabs->tabIdAt(3), 2);
+    QCOMPARE(tabs->tabIdAt(4), 4);
+    QCOMPARE(tabs->tabIdAt(5), 6);
+  }
+
+  void moveTabsToWorkspace_preservesRelativeOrder()
+  {
+    BrowserController browser;
+    TabModel* ws0Tabs = browser.tabs();
+    QVERIFY(ws0Tabs);
+
+    ws0Tabs->clear();
+    ws0Tabs->addTabWithId(1, QUrl("https://a.example"), "A", false);
+    ws0Tabs->addTabWithId(2, QUrl("https://b.example"), "B", false);
+    ws0Tabs->addTabWithId(3, QUrl("https://c.example"), "C", false);
+    ws0Tabs->addTabWithId(4, QUrl("https://d.example"), "D", false);
+
+    const int ws1 = browser.workspaces()->addWorkspace("Two");
+    QVERIFY(ws1 >= 0);
+
+    QVariantList ids;
+    ids << 2 << 4;
+    browser.moveTabsToWorkspace(ids, ws1);
+
+    QCOMPARE(ws0Tabs->count(), 2);
+    QCOMPARE(ws0Tabs->urlAt(0), QUrl("https://a.example"));
+    QCOMPARE(ws0Tabs->urlAt(1), QUrl("https://c.example"));
+
+    TabModel* ws1Tabs = browser.workspaces()->tabsForIndex(ws1);
+    QVERIFY(ws1Tabs);
+    QCOMPARE(ws1Tabs->count(), 2);
+    QCOMPARE(ws1Tabs->urlAt(0), QUrl("https://b.example"));
+    QCOMPARE(ws1Tabs->urlAt(1), QUrl("https://d.example"));
+  }
+
   void selection_tracksByTabIdAndSurvivesMoves()
   {
     TabModel model;

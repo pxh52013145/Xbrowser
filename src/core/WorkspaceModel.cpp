@@ -24,6 +24,15 @@ QColor defaultWorkspaceAccentColor(int id)
   const int idx = (id - 1) % paletteSize;
   return palette[idx];
 }
+
+int normalizeAngle(int angle)
+{
+  int normalized = angle % 360;
+  if (normalized < 0) {
+    normalized += 360;
+  }
+  return normalized;
+}
 }
 
 WorkspaceModel::WorkspaceModel(QObject* parent)
@@ -58,6 +67,16 @@ QVariant WorkspaceModel::data(const QModelIndex& index, int role) const
       return ws.name;
     case AccentColorRole:
       return ws.accentColor;
+    case BackgroundFromRole:
+      return ws.backgroundFrom;
+    case BackgroundMidRole:
+      return ws.backgroundHasMid ? ws.backgroundMid : QColor();
+    case BackgroundToRole:
+      return ws.backgroundTo;
+    case BackgroundAngleRole:
+      return ws.backgroundAngle;
+    case BackgroundStrengthRole:
+      return ws.backgroundStrength;
     case IconTypeRole:
       return ws.iconType;
     case IconValueRole:
@@ -79,6 +98,11 @@ QHash<int, QByteArray> WorkspaceModel::roleNames() const
     {WorkspaceIdRole, "workspaceId"},
     {NameRole, "name"},
     {AccentColorRole, "accentColor"},
+    {BackgroundFromRole, "backgroundFrom"},
+    {BackgroundMidRole, "backgroundMid"},
+    {BackgroundToRole, "backgroundTo"},
+    {BackgroundAngleRole, "backgroundAngle"},
+    {BackgroundStrengthRole, "backgroundStrength"},
     {IconTypeRole, "iconType"},
     {IconValueRole, "iconValue"},
     {IsActiveRole, "isActive"},
@@ -194,6 +218,18 @@ int WorkspaceModel::duplicateWorkspace(int index)
   const int newIndex = addWorkspace(QStringLiteral("Copy of %1").arg(sourceName));
 
   setAccentColorAt(newIndex, accentColorAt(index));
+  if (hasCustomBackgroundAt(index)) {
+    const QColor from = backgroundFromAt(index);
+    const QColor to = backgroundToAt(index);
+    const int angle = backgroundAngleAt(index);
+    const int strength = backgroundStrengthAt(index);
+    if (hasCustomBackgroundMidAt(index)) {
+      const QColor mid = backgroundMidAt(index);
+      setBackgroundGradient3At(newIndex, from, mid, to, angle, strength);
+    } else {
+      setBackgroundGradient2At(newIndex, from, to, angle, strength);
+    }
+  }
   setIconAt(newIndex, iconTypeAt(index), iconValueAt(index));
   setSidebarWidthAt(newIndex, sidebarWidthAt(index));
   setSidebarExpandedAt(newIndex, sidebarExpandedAt(index));
@@ -371,6 +407,148 @@ void WorkspaceModel::setAccentColorAt(int index, const QColor& color)
 
   ws.accentColor = next;
   emit dataChanged(this->index(index), this->index(index), {AccentColorRole});
+}
+
+bool WorkspaceModel::hasCustomBackgroundAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return false;
+  }
+  const auto& ws = m_workspaces[index];
+  return ws.backgroundFrom.isValid() && ws.backgroundTo.isValid();
+}
+
+bool WorkspaceModel::hasCustomBackgroundMidAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return false;
+  }
+  return m_workspaces[index].backgroundHasMid;
+}
+
+QColor WorkspaceModel::backgroundFromAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].backgroundFrom;
+}
+
+QColor WorkspaceModel::backgroundMidAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  const auto& ws = m_workspaces[index];
+  return ws.backgroundHasMid ? ws.backgroundMid : QColor();
+}
+
+QColor WorkspaceModel::backgroundToAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].backgroundTo;
+}
+
+int WorkspaceModel::backgroundAngleAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return 0;
+  }
+  return m_workspaces[index].backgroundAngle;
+}
+
+int WorkspaceModel::backgroundStrengthAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return 20;
+  }
+  return m_workspaces[index].backgroundStrength;
+}
+
+void WorkspaceModel::setBackgroundGradient2At(int index, const QColor& from, const QColor& to, int angle, int strength)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+  if (!from.isValid() || !to.isValid()) {
+    return;
+  }
+
+  auto& ws = m_workspaces[index];
+  const int nextAngle = normalizeAngle(angle);
+  const int nextStrength = qBound(0, strength, 100);
+
+  if (ws.backgroundFrom == from && !ws.backgroundHasMid && ws.backgroundTo == to && ws.backgroundAngle == nextAngle
+      && ws.backgroundStrength == nextStrength) {
+    return;
+  }
+
+  ws.backgroundFrom = from;
+  ws.backgroundMid = QColor();
+  ws.backgroundHasMid = false;
+  ws.backgroundTo = to;
+  ws.backgroundAngle = nextAngle;
+  ws.backgroundStrength = nextStrength;
+  emit dataChanged(
+    this->index(index),
+    this->index(index),
+    {BackgroundFromRole, BackgroundMidRole, BackgroundToRole, BackgroundAngleRole, BackgroundStrengthRole});
+}
+
+void WorkspaceModel::setBackgroundGradient3At(int index, const QColor& from, const QColor& mid, const QColor& to, int angle, int strength)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+  if (!from.isValid() || !mid.isValid() || !to.isValid()) {
+    return;
+  }
+
+  auto& ws = m_workspaces[index];
+  const int nextAngle = normalizeAngle(angle);
+  const int nextStrength = qBound(0, strength, 100);
+
+  if (ws.backgroundHasMid && ws.backgroundFrom == from && ws.backgroundMid == mid && ws.backgroundTo == to && ws.backgroundAngle == nextAngle
+      && ws.backgroundStrength == nextStrength) {
+    return;
+  }
+
+  ws.backgroundFrom = from;
+  ws.backgroundMid = mid;
+  ws.backgroundHasMid = true;
+  ws.backgroundTo = to;
+  ws.backgroundAngle = nextAngle;
+  ws.backgroundStrength = nextStrength;
+  emit dataChanged(
+    this->index(index),
+    this->index(index),
+    {BackgroundFromRole, BackgroundMidRole, BackgroundToRole, BackgroundAngleRole, BackgroundStrengthRole});
+}
+
+void WorkspaceModel::clearBackgroundGradientAt(int index)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  auto& ws = m_workspaces[index];
+  if (!ws.backgroundFrom.isValid() && !ws.backgroundTo.isValid() && !ws.backgroundHasMid && ws.backgroundAngle == 0
+      && ws.backgroundStrength == 20) {
+    return;
+  }
+
+  ws.backgroundFrom = {};
+  ws.backgroundMid = QColor();
+  ws.backgroundHasMid = false;
+  ws.backgroundTo = {};
+  ws.backgroundAngle = 0;
+  ws.backgroundStrength = 20;
+  emit dataChanged(
+    this->index(index),
+    this->index(index),
+    {BackgroundFromRole, BackgroundMidRole, BackgroundToRole, BackgroundAngleRole, BackgroundStrengthRole});
 }
 
 QString WorkspaceModel::iconTypeAt(int index) const

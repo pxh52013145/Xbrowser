@@ -53,6 +53,8 @@ public:
 
   Q_INVOKABLE void moveTabBefore(int tabId, int beforeTabId);
   Q_INVOKABLE void moveTabAfter(int tabId, int afterTabId);
+  Q_INVOKABLE void moveTabsBefore(const QVariantList& tabIds, int beforeTabId);
+  Q_INVOKABLE void moveTabsAfter(const QVariantList& tabIds, int afterTabId);
 
   Q_INVOKABLE bool handleBackRequested(int tabId, bool canGoBack);
 
@@ -77,6 +79,7 @@ public:
   void setRecentlyClosedTabs(const QVector<RecentlyClosedTab>& tabs);
 
   Q_INVOKABLE void moveTabToWorkspace(int tabId, int workspaceIndex);
+  Q_INVOKABLE void moveTabsToWorkspace(const QVariantList& tabIds, int workspaceIndex);
 
 signals:
   void tabsChanged();

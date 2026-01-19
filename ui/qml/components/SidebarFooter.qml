@@ -156,10 +156,22 @@ Item {
                     }
                     onDropped: (drop) => {
                         hoverSwitchTimer.stop()
-                        const dragged = Number(drop.mimeData.tabId || 0)
-                        if (dragged > 0) {
-                            root.browser.moveTabToWorkspace(dragged, index)
+                        let draggedIds = drop.mimeData.tabIds || []
+                        draggedIds = draggedIds.map(v => Number(v || 0)).filter(v => v > 0)
+                        if (draggedIds.length === 0) {
+                            const dragged = Number(drop.mimeData.tabId || 0)
+                            if (dragged > 0) {
+                                draggedIds = [dragged]
+                            }
                         }
+                        if (draggedIds.length === 0) {
+                            return
+                        }
+                        if (draggedIds.length === 1) {
+                            root.browser.moveTabToWorkspace(draggedIds[0], index)
+                            return
+                        }
+                        root.browser.moveTabsToWorkspace(draggedIds, index)
                     }
                 }
 
@@ -272,6 +284,19 @@ Item {
                 }
 
                 Button {
+                    text: "Background Gradient"
+                    enabled: root.workspaces.activeIndex >= 0 && root.workspaces.setBackgroundGradient2At
+                    onClicked: {
+                        root.popupHost.close()
+                        if (root.workspaces.activeIndex < 0) {
+                            return
+                        }
+                        root.popupContextHost.popupManagerContext = "sidebar-workspace-gradient"
+                        root.popupHost.openAtItem(gradientDialogComponent, workspaceMenuButton)
+                    }
+                }
+
+                Button {
                     text: "Duplicate Workspace"
                     enabled: root.workspaces.activeIndex >= 0
                     onClicked: {
@@ -296,6 +321,16 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    Component {
+        id: gradientDialogComponent
+
+        GradientGeneratorDialog {
+            workspaces: root.workspaces
+            workspaceIndex: root.workspaces.activeIndex
+            onCloseRequested: root.popupHost.close()
         }
     }
 
