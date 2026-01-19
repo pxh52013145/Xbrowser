@@ -74,6 +74,7 @@ xbrowser_add_test(xbrowser_test_notifications
 
 xbrowser_add_test(xbrowser_test_settings
   TestAppSettings.cpp
+  ../src/core/SidebarButtonsStore.cpp
 )
 
 xbrowser_add_test(xbrowser_test_layout
@@ -97,6 +98,10 @@ xbrowser_add_test(xbrowser_test_downloads
 
 xbrowser_add_test(xbrowser_test_workspaces
   TestWorkspaceModel.cpp
+)
+
+xbrowser_add_test(xbrowser_test_global_essentials
+  TestGlobalEssentials.cpp
 )
 
 xbrowser_add_test(xbrowser_test_splitview

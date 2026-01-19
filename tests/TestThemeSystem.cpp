@@ -96,6 +96,29 @@ private slots:
     QCOMPARE(theme.spacing(), 9);
   }
 
+  void themeController_appliesSettingsOverrides()
+  {
+    WorkspaceModel workspaces;
+    const int ws = workspaces.addWorkspaceWithId(1, "One", QColor("#6d9eeb"));
+    workspaces.setActiveIndex(ws);
+
+    AppSettings settings;
+    settings.setThemeId("workspace");
+    settings.setThemeAccent(QColor("#123456"));
+    settings.setThemeRadius(22);
+    settings.setThemeSeparation(17);
+
+    ThemePackModel packs;
+    ThemeController theme;
+    theme.setWorkspaces(&workspaces);
+    theme.setSettings(&settings);
+    theme.setThemePacks(&packs);
+
+    QCOMPARE(theme.accentColor(), QColor("#123456"));
+    QCOMPARE(theme.cornerRadius(), 22);
+    QCOMPARE(theme.spacing(), 17);
+  }
+
   void themeController_usesWorkspaceCustomGradientForWorkspaceTheme()
   {
     WorkspaceModel workspaces;

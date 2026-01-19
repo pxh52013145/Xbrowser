@@ -67,6 +67,8 @@ QVariant WorkspaceModel::data(const QModelIndex& index, int role) const
       return ws.name;
     case AccentColorRole:
       return ws.accentColor;
+    case ThemeOverrideRole:
+      return ws.themeOverrideId;
     case BackgroundFromRole:
       return ws.backgroundFrom;
     case BackgroundMidRole:
@@ -87,6 +89,8 @@ QVariant WorkspaceModel::data(const QModelIndex& index, int role) const
       return ws.sidebarWidth;
     case SidebarExpandedRole:
       return ws.sidebarExpanded;
+    case SidebarPanelRole:
+      return ws.sidebarPanel;
     default:
       return {};
   }
@@ -98,6 +102,7 @@ QHash<int, QByteArray> WorkspaceModel::roleNames() const
     {WorkspaceIdRole, "workspaceId"},
     {NameRole, "name"},
     {AccentColorRole, "accentColor"},
+    {ThemeOverrideRole, "themeOverrideId"},
     {BackgroundFromRole, "backgroundFrom"},
     {BackgroundMidRole, "backgroundMid"},
     {BackgroundToRole, "backgroundTo"},
@@ -108,6 +113,7 @@ QHash<int, QByteArray> WorkspaceModel::roleNames() const
     {IsActiveRole, "isActive"},
     {SidebarWidthRole, "sidebarWidth"},
     {SidebarExpandedRole, "sidebarExpanded"},
+    {SidebarPanelRole, "sidebarPanel"},
   };
 }
 
@@ -218,6 +224,7 @@ int WorkspaceModel::duplicateWorkspace(int index)
   const int newIndex = addWorkspace(QStringLiteral("Copy of %1").arg(sourceName));
 
   setAccentColorAt(newIndex, accentColorAt(index));
+  setThemeOverrideAt(newIndex, themeOverrideAt(index));
   if (hasCustomBackgroundAt(index)) {
     const QColor from = backgroundFromAt(index);
     const QColor to = backgroundToAt(index);
@@ -233,6 +240,7 @@ int WorkspaceModel::duplicateWorkspace(int index)
   setIconAt(newIndex, iconTypeAt(index), iconValueAt(index));
   setSidebarWidthAt(newIndex, sidebarWidthAt(index));
   setSidebarExpandedAt(newIndex, sidebarExpandedAt(index));
+  setSidebarPanelAt(newIndex, sidebarPanelAt(index));
 
   TabGroupModel* srcGroups = groupsForIndex(index);
   TabGroupModel* dstGroups = groupsForIndex(newIndex);
@@ -407,6 +415,42 @@ void WorkspaceModel::setAccentColorAt(int index, const QColor& color)
 
   ws.accentColor = next;
   emit dataChanged(this->index(index), this->index(index), {AccentColorRole});
+}
+
+QString WorkspaceModel::themeOverrideAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].themeOverrideId;
+}
+
+void WorkspaceModel::setThemeOverrideAt(int index, const QString& themeId)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  QString next = themeId.trimmed();
+  if (next == QLatin1String("workspace")) {
+    next.clear();
+  }
+
+  auto& ws = m_workspaces[index];
+  if (ws.themeOverrideId == next) {
+    return;
+  }
+
+  ws.themeOverrideId = next;
+  emit dataChanged(this->index(index), this->index(index), {ThemeOverrideRole});
+}
+
+QString WorkspaceModel::activeThemeOverride() const
+{
+  if (m_activeIndex < 0 || m_activeIndex >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[m_activeIndex].themeOverrideId;
 }
 
 bool WorkspaceModel::hasCustomBackgroundAt(int index) const
@@ -641,6 +685,32 @@ void WorkspaceModel::setSidebarExpandedAt(int index, bool expanded)
   emit dataChanged(this->index(index), this->index(index), {SidebarExpandedRole});
 }
 
+QString WorkspaceModel::sidebarPanelAt(int index) const
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return {};
+  }
+  return m_workspaces[index].sidebarPanel;
+}
+
+void WorkspaceModel::setSidebarPanelAt(int index, const QString& panelId)
+{
+  if (index < 0 || index >= m_workspaces.size()) {
+    return;
+  }
+
+  const QString trimmed = panelId.trimmed();
+  const QString next = trimmed.isEmpty() ? QStringLiteral("tabs") : trimmed;
+
+  auto& ws = m_workspaces[index];
+  if (ws.sidebarPanel == next) {
+    return;
+  }
+
+  ws.sidebarPanel = next;
+  emit dataChanged(this->index(index), this->index(index), {SidebarPanelRole});
+}
+
 int WorkspaceModel::activeWorkspaceId() const
 {
   if (m_activeIndex < 0 || m_activeIndex >= m_workspaces.size()) {
@@ -671,6 +741,21 @@ TabGroupModel* WorkspaceModel::groupsForIndex(int index) const
     return nullptr;
   }
   return m_workspaces[index].groups;
+}
+
+TabModel* WorkspaceModel::tabsForWorkspaceId(int workspaceId) const
+{
+  if (workspaceId <= 0) {
+    return nullptr;
+  }
+
+  for (const auto& ws : m_workspaces) {
+    if (ws.id == workspaceId) {
+      return ws.tabs;
+    }
+  }
+
+  return nullptr;
 }
 
 void WorkspaceModel::updateActiveIndexAfterClose(int closedIndex)

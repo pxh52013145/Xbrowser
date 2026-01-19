@@ -474,8 +474,12 @@ void TabModel::setEssentialAt(int index, bool essential)
   }
 
   tab.essential = essential;
-  if (tab.essential && tab.initialUrl.isEmpty()) {
-    tab.initialUrl = tab.url;
+  if (tab.essential) {
+    if (tab.url.isValid() && !tab.url.isEmpty()) {
+      tab.initialUrl = tab.url;
+    } else if (tab.initialUrl.isEmpty()) {
+      tab.initialUrl = tab.url;
+    }
   }
   emit dataChanged(this->index(index), this->index(index), {IsEssentialRole});
 }

@@ -57,6 +57,13 @@ signals:
   void webSuggestionsReady(const QString& query, const QVariantList& suggestions);
 
 private:
+  struct IncrementalSuggestionsCache
+  {
+    QPointer<QAbstractItemModel> model;
+    QString query;
+    QVariantList hits;
+  };
+
   void emitWebSuggestionsForQuery(const QString& query, const QVariantList& suggestions);
 
   void fireWebSuggestionsRequest();
@@ -70,4 +77,7 @@ private:
   int m_pendingWebSuggestionsLimit = 6;
   QString m_inflightWebSuggestionsQuery;
   int m_inflightWebSuggestionsLimit = 6;
+
+  mutable IncrementalSuggestionsCache m_bookmarksCache;
+  mutable IncrementalSuggestionsCache m_historyCache;
 };

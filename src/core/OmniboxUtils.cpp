@@ -46,6 +46,44 @@ int roleIdForName(const QHash<int, QByteArray>& roles, const QByteArray& name)
   return -1;
 }
 
+bool isQueryExtension(const QString& prev, const QString& next)
+{
+  if (prev.isEmpty() || next.size() <= prev.size()) {
+    return false;
+  }
+  return next.startsWith(prev, Qt::CaseInsensitive);
+}
+
+QVariantList filterCachedTitleSubtitleHits(const QVariantList& hits, const QString& query, int limit)
+{
+  QVariantList out;
+  if (hits.isEmpty() || query.isEmpty() || limit <= 0) {
+    return out;
+  }
+
+  out.reserve(std::min<qsizetype>(limit, hits.size()));
+  for (const QVariant& v : hits) {
+    if (out.size() >= limit) {
+      break;
+    }
+
+    const QVariantMap row = v.toMap();
+    const QString title = row.value(QStringLiteral("title")).toString();
+    const QString subtitle = row.value(QStringLiteral("subtitle")).toString();
+    if (!title.contains(query, Qt::CaseInsensitive) && !subtitle.contains(query, Qt::CaseInsensitive)) {
+      continue;
+    }
+
+    QVariantMap next = row;
+    const QVariantMap range = matchRangeForQuery(query, title);
+    next.insert(QStringLiteral("matchStart"), range.value(QStringLiteral("start"), -1).toInt());
+    next.insert(QStringLiteral("matchLength"), range.value(QStringLiteral("length"), 0).toInt());
+    out.append(std::move(next));
+  }
+
+  return out;
+}
+
 struct WorkspaceHit
 {
   int score = -1;
@@ -428,6 +466,15 @@ QVariantList OmniboxUtils::bookmarkSuggestions(QAbstractItemModel* bookmarks, co
     return {};
   }
 
+  if (m_bookmarksCache.model == bookmarks && isQueryExtension(m_bookmarksCache.query, q) && m_bookmarksCache.hits.size() >= limit) {
+    const QVariantList filtered = filterCachedTitleSubtitleHits(m_bookmarksCache.hits, q, limit);
+    if (filtered.size() >= limit) {
+      m_bookmarksCache.query = q;
+      m_bookmarksCache.hits = filtered;
+      return filtered;
+    }
+  }
+
   const QHash<int, QByteArray> roles = bookmarks->roleNames();
   const int titleRole = roleIdForName(roles, QByteArrayLiteral("title"));
   const int urlRole = roleIdForName(roles, QByteArrayLiteral("url"));
@@ -513,6 +560,10 @@ QVariantList OmniboxUtils::bookmarkSuggestions(QAbstractItemModel* bookmarks, co
     row.insert(QStringLiteral("matchLength"), hit.matchLength);
     out.append(std::move(row));
   }
+
+  m_bookmarksCache.model = bookmarks;
+  m_bookmarksCache.query = q;
+  m_bookmarksCache.hits = out;
   return out;
 }
 
@@ -525,6 +576,15 @@ QVariantList OmniboxUtils::historySuggestions(QAbstractItemModel* history, const
   const QString q = query.trimmed();
   if (q.isEmpty()) {
     return {};
+  }
+
+  if (m_historyCache.model == history && isQueryExtension(m_historyCache.query, q) && m_historyCache.hits.size() >= limit) {
+    const QVariantList filtered = filterCachedTitleSubtitleHits(m_historyCache.hits, q, limit);
+    if (filtered.size() >= limit) {
+      m_historyCache.query = q;
+      m_historyCache.hits = filtered;
+      return filtered;
+    }
   }
 
   const QHash<int, QByteArray> roles = history->roleNames();
@@ -612,6 +672,10 @@ QVariantList OmniboxUtils::historySuggestions(QAbstractItemModel* history, const
     row.insert(QStringLiteral("matchLength"), hit.matchLength);
     out.append(std::move(row));
   }
+
+  m_historyCache.model = history;
+  m_historyCache.query = q;
+  m_historyCache.hits = out;
   return out;
 }
 

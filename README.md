@@ -46,3 +46,9 @@ cmake --build build --config Debug
 - Qt 6.6+（Qt Quick / Qt Quick Controls 2 / Qt Shader Tools）
 - CMake 3.24+
 - WebView2 Runtime（Evergreen，系统通常已安装；否则按文档安装）
+
+**怎么打开浏览器（开发建议）**
+
+* 一键构建+运行：双击 **dev.cmd (line 1)**（失败会暂停显示错误），或命令行 **dev.ps1 -Config Debug**（见 **RUNNING.md (line 1)**）。
+* 直接运行现有构建：双击 **run.cmd (line 1)**，或命令行 **run.ps1 -Config Debug**（会自动补齐 Qt DLL/插件）。
+* 需要“可双击 exe”：先跑一次 **deploy.cmd (line 1)**，再双击 **xbrowser.exe**（Qt 缺 DLL 问题用这套即可一劳永逸）。

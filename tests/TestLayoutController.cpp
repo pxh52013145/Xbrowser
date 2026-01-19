@@ -183,6 +183,12 @@ private slots:
     layout.setPopupManagerContext("sidebar-workspace-rename");
     QVERIFY(layout.showSidebar());
 
+    layout.setPopupManagerContext("sidebar-workspace-theme");
+    QVERIFY(layout.showSidebar());
+
+    layout.setPopupManagerContext("sidebar-workspace-gradient");
+    QVERIFY(layout.showSidebar());
+
     layout.setPopupManagerContext("");
     QVERIFY(!layout.showSidebar());
 

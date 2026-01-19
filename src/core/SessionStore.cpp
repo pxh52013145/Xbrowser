@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -17,7 +18,7 @@
 
 namespace
 {
-constexpr int kSessionVersion = 3;
+constexpr int kSessionVersion = 4;
 
 QString sessionPath()
 {
@@ -168,6 +169,8 @@ bool SessionStore::restoreNow(QString* error)
   WorkspaceModel* workspaces = m_browser->workspaces();
   workspaces->clear();
 
+  QHash<int, SplitViewController::WorkspaceState> splitStatesByWorkspaceId;
+
   const QJsonArray workspacesArr = root.value("workspaces").toArray();
   for (const QJsonValue& wsVal : workspacesArr) {
     const QJsonObject wsObj = wsVal.toObject();
@@ -182,11 +185,17 @@ bool SessionStore::restoreNow(QString* error)
       workspaces->setSidebarWidthAt(wsIndex, sidebarWidth);
     }
     workspaces->setSidebarExpandedAt(wsIndex, wsObj.value("sidebarExpanded").toBool(true));
+    workspaces->setSidebarPanelAt(wsIndex, wsObj.value("sidebarPanel").toString(QStringLiteral("tabs")));
 
     const QString iconType = wsObj.value("iconType").toString();
     const QString iconValue = wsObj.value("iconValue").toString();
     if (!iconType.trimmed().isEmpty() || !iconValue.trimmed().isEmpty()) {
       workspaces->setIconAt(wsIndex, iconType, iconValue);
+    }
+
+    const QString themeOverrideId = wsObj.value("themeOverrideId").toString();
+    if (!themeOverrideId.trimmed().isEmpty()) {
+      workspaces->setThemeOverrideAt(wsIndex, themeOverrideId);
     }
 
     const QColor bgFrom = parseColor(wsObj.value("backgroundFrom"));
@@ -246,6 +255,37 @@ bool SessionStore::restoreNow(QString* error)
         tabs->setActiveIndex(0);
       }
     }
+
+    if (m_splitView && wsId > 0) {
+      const QJsonObject splitObj = wsObj.value("splitView").toObject();
+      if (!splitObj.isEmpty()) {
+        SplitViewController::WorkspaceState state;
+        state.enabled = splitObj.value("enabled").toBool(false);
+        state.paneCount = splitObj.value("paneCount").toInt(2);
+        state.focusedPane = splitObj.value("focusedPane").toInt(0);
+        state.splitRatio = splitObj.value("splitRatio").toDouble(0.5);
+        state.gridSplitRatioX = splitObj.value("gridSplitRatioX").toDouble(0.5);
+        state.gridSplitRatioY = splitObj.value("gridSplitRatioY").toDouble(0.5);
+
+        const QJsonArray paneIds = splitObj.value("paneTabIds").toArray();
+        if (!paneIds.isEmpty()) {
+          const int restoredCount = qBound(2, qMax(state.paneCount, paneIds.size()), 4);
+          state.paneCount = restoredCount;
+          state.paneTabIds.resize(restoredCount);
+          for (int i = 0; i < restoredCount && i < paneIds.size(); ++i) {
+            state.paneTabIds[i] = paneIds.at(i).toInt(0);
+          }
+        } else {
+          state.paneTabIds.resize(qBound(2, state.paneCount, 4));
+          state.paneTabIds[0] = splitObj.value("primaryTabId").toInt(0);
+          if (state.paneTabIds.size() > 1) {
+            state.paneTabIds[1] = splitObj.value("secondaryTabId").toInt(0);
+          }
+        }
+
+        splitStatesByWorkspaceId.insert(wsId, state);
+      }
+    }
   }
 
   if (workspaces->count() == 0) {
@@ -291,34 +331,44 @@ bool SessionStore::restoreNow(QString* error)
   }
 
   if (m_splitView) {
-    const QJsonObject splitObj = root.value("splitView").toObject();
-    const bool enabled = splitObj.value("enabled").toBool(false);
-    const int primaryTabId = splitObj.value("primaryTabId").toInt(0);
-    const int secondaryTabId = splitObj.value("secondaryTabId").toInt(0);
-    const int focusedPane = splitObj.value("focusedPane").toInt(0);
-    const double splitRatio = splitObj.value("splitRatio").toDouble(0.5);
-    const double gridSplitRatioX = splitObj.value("gridSplitRatioX").toDouble(0.5);
-    const double gridSplitRatioY = splitObj.value("gridSplitRatioY").toDouble(0.5);
-    const int paneCount = splitObj.value("paneCount").toInt(2);
-    const QJsonArray paneIds = splitObj.value("paneTabIds").toArray();
+    if (version < 4) {
+      const QJsonObject splitObj = root.value("splitView").toObject();
+      if (!splitObj.isEmpty()) {
+        SplitViewController::WorkspaceState state;
+        state.enabled = splitObj.value("enabled").toBool(false);
+        state.paneCount = splitObj.value("paneCount").toInt(2);
+        state.focusedPane = splitObj.value("focusedPane").toInt(0);
+        state.splitRatio = splitObj.value("splitRatio").toDouble(0.5);
+        state.gridSplitRatioX = splitObj.value("gridSplitRatioX").toDouble(0.5);
+        state.gridSplitRatioY = splitObj.value("gridSplitRatioY").toDouble(0.5);
 
-    if (!paneIds.isEmpty()) {
-      const int restoredCount = qBound(2, qMax(paneCount, paneIds.size()), 4);
-      m_splitView->setPaneCount(restoredCount);
-      for (int i = 0; i < restoredCount && i < paneIds.size(); ++i) {
-        m_splitView->setTabIdForPane(i, paneIds.at(i).toInt(0));
+        const QJsonArray paneIds = splitObj.value("paneTabIds").toArray();
+        if (!paneIds.isEmpty()) {
+          const int restoredCount = qBound(2, qMax(state.paneCount, paneIds.size()), 4);
+          state.paneCount = restoredCount;
+          state.paneTabIds.resize(restoredCount);
+          for (int i = 0; i < restoredCount && i < paneIds.size(); ++i) {
+            state.paneTabIds[i] = paneIds.at(i).toInt(0);
+          }
+        } else {
+          state.paneTabIds.resize(qBound(2, state.paneCount, 4));
+          state.paneTabIds[0] = splitObj.value("primaryTabId").toInt(0);
+          if (state.paneTabIds.size() > 1) {
+            state.paneTabIds[1] = splitObj.value("secondaryTabId").toInt(0);
+          }
+        }
+
+        const int activeWsId = workspaces->activeWorkspaceId();
+        if (activeWsId > 0) {
+          splitStatesByWorkspaceId.insert(activeWsId, state);
+        }
       }
-    } else {
-      m_splitView->setPaneCount(qBound(2, paneCount, 4));
-      m_splitView->setPrimaryTabId(primaryTabId);
-      m_splitView->setSecondaryTabId(secondaryTabId);
     }
 
-    m_splitView->setSplitRatio(splitRatio);
-    m_splitView->setGridSplitRatioX(gridSplitRatioX);
-    m_splitView->setGridSplitRatioY(gridSplitRatioY);
-    m_splitView->setEnabled(enabled);
-    m_splitView->setFocusedPane(focusedPane);
+    for (auto it = splitStatesByWorkspaceId.constBegin(); it != splitStatesByWorkspaceId.constEnd(); ++it) {
+      m_splitView->setStateForWorkspaceId(it.key(), it.value());
+    }
+    m_splitView->applyWorkspaceState(workspaces->activeWorkspaceId());
   }
 
   m_restoring = false;
@@ -357,8 +407,10 @@ bool SessionStore::saveNow(QString* error) const
     wsObj.insert("backgroundStrength", workspaces->backgroundStrengthAt(i));
     wsObj.insert("iconType", workspaces->iconTypeAt(i));
     wsObj.insert("iconValue", workspaces->iconValueAt(i));
+    wsObj.insert("themeOverrideId", workspaces->themeOverrideAt(i));
     wsObj.insert("sidebarWidth", workspaces->sidebarWidthAt(i));
     wsObj.insert("sidebarExpanded", workspaces->sidebarExpandedAt(i));
+    wsObj.insert("sidebarPanel", workspaces->sidebarPanelAt(i));
 
     TabGroupModel* groups = workspaces->groupsForIndex(i);
     QJsonArray groupsArr;
@@ -397,6 +449,28 @@ bool SessionStore::saveNow(QString* error) const
     wsObj.insert("tabs", tabsArr);
     wsObj.insert("activeTabId", activeTabId);
 
+    if (m_splitView) {
+      const int workspaceId = workspaces->workspaceIdAt(i);
+      const SplitViewController::WorkspaceState state = m_splitView->stateForWorkspaceId(workspaceId);
+
+      QJsonObject splitObj;
+      splitObj.insert("enabled", state.enabled);
+      splitObj.insert("paneCount", qBound(2, state.paneCount, 4));
+
+      QJsonArray paneIds;
+      const int paneCount = qBound(2, state.paneCount, 4);
+      for (int p = 0; p < paneCount; ++p) {
+        paneIds.push_back(p < state.paneTabIds.size() ? state.paneTabIds.at(p) : 0);
+      }
+      splitObj.insert("paneTabIds", paneIds);
+
+      splitObj.insert("focusedPane", state.focusedPane);
+      splitObj.insert("splitRatio", state.splitRatio);
+      splitObj.insert("gridSplitRatioX", state.gridSplitRatioX);
+      splitObj.insert("gridSplitRatioY", state.gridSplitRatioY);
+      wsObj.insert("splitView", splitObj);
+    }
+
     workspacesArr.push_back(wsObj);
   }
 
@@ -425,27 +499,6 @@ bool SessionStore::saveNow(QString* error) const
     }
 
     root.insert("recentlyClosedTabs", closedArr);
-  }
-
-  if (m_splitView) {
-    QJsonObject splitObj;
-    splitObj.insert("enabled", m_splitView->enabled());
-    splitObj.insert("primaryTabId", m_splitView->primaryTabId());
-    splitObj.insert("secondaryTabId", m_splitView->secondaryTabId());
-    splitObj.insert("paneCount", m_splitView->paneCount());
-
-    QJsonArray paneIds;
-    const int paneCount = m_splitView->paneCount();
-    for (int i = 0; i < paneCount; ++i) {
-      paneIds.push_back(m_splitView->tabIdForPane(i));
-    }
-    splitObj.insert("paneTabIds", paneIds);
-
-    splitObj.insert("focusedPane", m_splitView->focusedPane());
-    splitObj.insert("splitRatio", m_splitView->splitRatio());
-    splitObj.insert("gridSplitRatioX", m_splitView->gridSplitRatioX());
-    splitObj.insert("gridSplitRatioY", m_splitView->gridSplitRatioY());
-    root.insert("splitView", splitObj);
   }
 
   QSaveFile out(sessionPath());

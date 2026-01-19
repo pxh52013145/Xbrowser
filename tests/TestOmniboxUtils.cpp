@@ -42,6 +42,8 @@ public:
 
   QVariant data(const QModelIndex& index, int role) const override
   {
+    m_dataCallCount += 1;
+
     if (!index.isValid() || index.row() < 0 || index.row() >= m_entries.size()) {
       return {};
     }
@@ -80,9 +82,20 @@ public:
     endInsertRows();
   }
 
+  int dataCallCount() const
+  {
+    return m_dataCallCount;
+  }
+
+  void resetDataCallCount()
+  {
+    m_dataCallCount = 0;
+  }
+
 private:
   QVector<Entry> m_entries;
   QByteArray m_timeRoleName;
+  mutable int m_dataCallCount = 0;
 };
 
 class MockWebSuggestionsProvider final : public WebSuggestionsProvider
@@ -297,6 +310,23 @@ private slots:
     QCOMPARE(first.value("subtitle").toString(), QUrl("https://example.com/special-path").toString());
   }
 
+  void bookmarkSuggestions_usesIncrementalCacheWhenQueryExtends()
+  {
+    SimpleSuggestionsModel bookmarks(QByteArrayLiteral("createdMs"));
+    bookmarks.addEntry("Example One", QUrl("https://example.com/one"), 3000);
+    bookmarks.addEntry("Example Two", QUrl("https://example.com/two"), 2000);
+    bookmarks.addEntry("Other", QUrl("https://other.com"), 1000);
+
+    OmniboxUtils utils;
+    const QVariantList hits = utils.bookmarkSuggestions(&bookmarks, "ex", 2);
+    QCOMPARE(hits.size(), 2);
+
+    bookmarks.resetDataCallCount();
+    const QVariantList cachedHits = utils.bookmarkSuggestions(&bookmarks, "exa", 2);
+    QCOMPARE(cachedHits.size(), 2);
+    QCOMPARE(bookmarks.dataCallCount(), 0);
+  }
+
   void historySuggestions_ordersByVisitedMsAndTrimsQuery()
   {
     SimpleSuggestionsModel history(QByteArrayLiteral("visitedMs"));
@@ -312,6 +342,23 @@ private slots:
     const QVariantMap second = hits.at(1).toMap();
     QCOMPARE(first.value("title").toString(), QStringLiteral("Beta"));
     QCOMPARE(second.value("title").toString(), QStringLiteral("Gamma"));
+  }
+
+  void historySuggestions_usesIncrementalCacheWhenQueryExtends()
+  {
+    SimpleSuggestionsModel history(QByteArrayLiteral("visitedMs"));
+    history.addEntry("Example One", QUrl("https://example.com/one"), 3000);
+    history.addEntry("Example Two", QUrl("https://example.com/two"), 2000);
+    history.addEntry("Other", QUrl("https://other.com"), 1000);
+
+    OmniboxUtils utils;
+    const QVariantList hits = utils.historySuggestions(&history, "ex", 2);
+    QCOMPARE(hits.size(), 2);
+
+    history.resetDataCallCount();
+    const QVariantList cachedHits = utils.historySuggestions(&history, "exa", 2);
+    QCOMPARE(cachedHits.size(), 2);
+    QCOMPARE(history.dataCallCount(), 0);
   }
 
   void webSuggestions_debouncesProviderRequests()

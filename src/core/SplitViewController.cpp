@@ -3,6 +3,7 @@
 #include "BrowserController.h"
 #include "TabModel.h"
 
+#include <QSignalBlocker>
 #include <QSet>
 #include <utility>
 
@@ -26,18 +27,172 @@ void SplitViewController::setBrowser(BrowserController* browser)
 
   m_browser = browser;
   connectTabsModel();
+  m_activeWorkspaceId = currentWorkspaceId();
 
   if (m_browser) {
     connect(m_browser, &BrowserController::tabsChanged, this, [this] {
+      storeStateForWorkspaceId(m_activeWorkspaceId);
+      m_suppressEnsureTabs = true;
       connectTabsModel();
-      if (m_enabled) {
-        const bool changed = ensureTabs();
-        if (changed) {
-          emit tabsChanged();
-        }
-      }
+      m_activeWorkspaceId = currentWorkspaceId();
+      restoreStateForWorkspaceId(m_activeWorkspaceId);
+      m_suppressEnsureTabs = false;
     });
   }
+
+  restoreStateForWorkspaceId(m_activeWorkspaceId);
+}
+
+int SplitViewController::currentWorkspaceId() const
+{
+  if (!m_browser) {
+    return 0;
+  }
+  WorkspaceModel* workspaces = m_browser->workspaces();
+  return workspaces ? workspaces->activeWorkspaceId() : 0;
+}
+
+SplitViewController::WorkspaceState SplitViewController::captureState() const
+{
+  WorkspaceState state;
+  state.enabled = m_enabled;
+  state.paneCount = m_paneCount;
+  state.paneTabIds = m_paneTabIds;
+  state.focusedPane = m_focusedPane;
+  state.splitRatio = m_splitRatio;
+  state.gridSplitRatioX = m_gridSplitRatioX;
+  state.gridSplitRatioY = m_gridSplitRatioY;
+  return state;
+}
+
+void SplitViewController::storeStateForWorkspaceId(int workspaceId)
+{
+  if (workspaceId <= 0) {
+    return;
+  }
+  m_stateByWorkspaceId.insert(workspaceId, captureState());
+}
+
+void SplitViewController::restoreStateForWorkspaceId(int workspaceId)
+{
+  if (workspaceId <= 0) {
+    applyState(WorkspaceState{});
+    return;
+  }
+
+  const auto it = m_stateByWorkspaceId.constFind(workspaceId);
+  if (it == m_stateByWorkspaceId.constEnd()) {
+    applyState(WorkspaceState{});
+    return;
+  }
+
+  applyState(it.value());
+}
+
+void SplitViewController::applyState(const WorkspaceState& requested)
+{
+  WorkspaceState state = requested;
+  state.paneCount = qBound(2, state.paneCount, 4);
+  if (state.paneTabIds.size() != state.paneCount) {
+    state.paneTabIds.resize(state.paneCount);
+  }
+
+  const int nextFocusedLimit = state.enabled ? qMax(0, state.paneCount - 1) : 0;
+  state.focusedPane = qBound(0, state.focusedPane, nextFocusedLimit);
+  state.splitRatio = qBound(0.1, state.splitRatio, 0.9);
+  state.gridSplitRatioX = qBound(0.1, state.gridSplitRatioX, 0.9);
+  state.gridSplitRatioY = qBound(0.1, state.gridSplitRatioY, 0.9);
+
+  const bool enabledValueChanged = m_enabled != state.enabled;
+  bool tabsChangedSignal = (m_paneCount != state.paneCount) || (m_paneTabIds != state.paneTabIds);
+  const bool focusedChanged = m_focusedPane != (state.enabled ? state.focusedPane : 0);
+  const bool splitRatioValueChanged = !qFuzzyCompare(m_splitRatio, state.splitRatio);
+  const bool gridXChanged = !qFuzzyCompare(m_gridSplitRatioX, state.gridSplitRatioX);
+  const bool gridYChanged = !qFuzzyCompare(m_gridSplitRatioY, state.gridSplitRatioY);
+
+  {
+    QSignalBlocker blocker(this);
+
+    m_splitRatio = state.splitRatio;
+    m_gridSplitRatioX = state.gridSplitRatioX;
+    m_gridSplitRatioY = state.gridSplitRatioY;
+    m_paneCount = state.paneCount;
+    m_paneTabIds = state.paneTabIds;
+    m_enabled = state.enabled;
+    m_focusedPane = state.enabled ? state.focusedPane : 0;
+
+    if (m_enabled) {
+      const bool ensured = ensureTabs();
+      if (ensured) {
+        tabsChangedSignal = true;
+      }
+      if (m_focusedPane >= m_paneCount) {
+        m_focusedPane = qMax(0, m_paneCount - 1);
+      }
+    }
+  }
+
+  if (enabledValueChanged) {
+    emit enabledChanged();
+  }
+  if (tabsChangedSignal) {
+    emit tabsChanged();
+  }
+  if (focusedChanged) {
+    emit focusedPaneChanged();
+  }
+  if (splitRatioValueChanged) {
+    emit splitRatioChanged();
+  }
+  if (gridXChanged) {
+    emit gridSplitRatioXChanged();
+  }
+  if (gridYChanged) {
+    emit gridSplitRatioYChanged();
+  }
+}
+
+SplitViewController::WorkspaceState SplitViewController::stateForWorkspaceId(int workspaceId) const
+{
+  int wsId = workspaceId;
+  if (wsId <= 0) {
+    wsId = currentWorkspaceId();
+  }
+
+  if (wsId > 0 && wsId == m_activeWorkspaceId) {
+    return captureState();
+  }
+
+  const auto it = m_stateByWorkspaceId.constFind(wsId);
+  if (it != m_stateByWorkspaceId.constEnd()) {
+    return it.value();
+  }
+
+  return WorkspaceState{};
+}
+
+void SplitViewController::setStateForWorkspaceId(int workspaceId, const WorkspaceState& state)
+{
+  if (workspaceId <= 0) {
+    return;
+  }
+  m_stateByWorkspaceId.insert(workspaceId, state);
+}
+
+void SplitViewController::applyWorkspaceState(int workspaceId)
+{
+  const int current = currentWorkspaceId();
+  if (current <= 0) {
+    return;
+  }
+
+  const int wsId = workspaceId > 0 ? workspaceId : current;
+  if (wsId != current) {
+    return;
+  }
+
+  m_activeWorkspaceId = current;
+  restoreStateForWorkspaceId(wsId);
 }
 
 bool SplitViewController::enabled() const
@@ -413,7 +568,7 @@ void SplitViewController::connectTabsModel()
   }
 
   connect(m_tabs, &QAbstractItemModel::rowsRemoved, this, [this] {
-    if (!m_enabled) {
+    if (!m_enabled || m_suppressEnsureTabs) {
       return;
     }
     const bool changed = ensureTabs();
@@ -422,7 +577,7 @@ void SplitViewController::connectTabsModel()
     }
   });
   connect(m_tabs, &QAbstractItemModel::modelReset, this, [this] {
-    if (!m_enabled) {
+    if (!m_enabled || m_suppressEnsureTabs) {
       return;
     }
     const bool changed = ensureTabs();

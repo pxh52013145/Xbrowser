@@ -32,6 +32,16 @@ QString zoomHostKey(const QUrl& url)
   const QString host = url.host().trimmed().toLower();
   return host;
 }
+
+QColor parseColorString(const QJsonValue& value)
+{
+  const QString text = value.toString().trimmed();
+  if (text.isEmpty()) {
+    return {};
+  }
+  const QColor c(text);
+  return c.isValid() ? c : QColor();
+}
 }
 
 AppSettings::AppSettings(QObject* parent)
@@ -74,6 +84,53 @@ void AppSettings::setSidebarExpanded(bool expanded)
   }
   m_sidebarExpanded = expanded;
   emit sidebarExpandedChanged();
+  scheduleSave();
+}
+
+QString AppSettings::sidebarPanel() const
+{
+  return m_sidebarPanel;
+}
+
+void AppSettings::setSidebarPanel(const QString& panelId)
+{
+  const QString trimmed = panelId.trimmed();
+  const QString next = trimmed.isEmpty() ? QStringLiteral("tabs") : trimmed;
+  if (m_sidebarPanel == next) {
+    return;
+  }
+  m_sidebarPanel = next;
+  emit sidebarPanelChanged();
+  scheduleSave();
+}
+
+bool AppSettings::sidebarToolsDocked() const
+{
+  return m_sidebarToolsDocked;
+}
+
+void AppSettings::setSidebarToolsDocked(bool docked)
+{
+  if (m_sidebarToolsDocked == docked) {
+    return;
+  }
+  m_sidebarToolsDocked = docked;
+  emit sidebarToolsDockedChanged();
+  scheduleSave();
+}
+
+bool AppSettings::sidebarHoverExpandEnabled() const
+{
+  return m_sidebarHoverExpandEnabled;
+}
+
+void AppSettings::setSidebarHoverExpandEnabled(bool enabled)
+{
+  if (m_sidebarHoverExpandEnabled == enabled) {
+    return;
+  }
+  m_sidebarHoverExpandEnabled = enabled;
+  emit sidebarHoverExpandEnabledChanged();
   scheduleSave();
 }
 
@@ -167,6 +224,21 @@ void AppSettings::setEssentialCloseResets(bool enabled)
   scheduleSave();
 }
 
+bool AppSettings::globalEssentialsEnabled() const
+{
+  return m_globalEssentialsEnabled;
+}
+
+void AppSettings::setGlobalEssentialsEnabled(bool enabled)
+{
+  if (m_globalEssentialsEnabled == enabled) {
+    return;
+  }
+  m_globalEssentialsEnabled = enabled;
+  emit globalEssentialsEnabledChanged();
+  scheduleSave();
+}
+
 bool AppSettings::compactMode() const
 {
   return m_compactMode;
@@ -226,6 +298,60 @@ void AppSettings::setThemeId(const QString& themeId)
   }
   m_themeId = trimmed.isEmpty() ? QStringLiteral("workspace") : trimmed;
   emit themeIdChanged();
+  scheduleSave();
+}
+
+QColor AppSettings::themeAccent() const
+{
+  return m_themeAccent;
+}
+
+void AppSettings::setThemeAccent(const QColor& accent)
+{
+  QColor next = accent;
+  if (!next.isValid() || next.alpha() == 0) {
+    next = QColor();
+  } else if (next.alpha() != 255) {
+    next.setAlpha(255);
+  }
+
+  if (m_themeAccent == next) {
+    return;
+  }
+  m_themeAccent = next;
+  emit themeAccentChanged();
+  scheduleSave();
+}
+
+int AppSettings::themeRadius() const
+{
+  return m_themeRadius;
+}
+
+void AppSettings::setThemeRadius(int radius)
+{
+  const int next = radius < 0 ? -1 : qBound(0, radius, 24);
+  if (m_themeRadius == next) {
+    return;
+  }
+  m_themeRadius = next;
+  emit themeRadiusChanged();
+  scheduleSave();
+}
+
+int AppSettings::themeSeparation() const
+{
+  return m_themeSeparation;
+}
+
+void AppSettings::setThemeSeparation(int separation)
+{
+  const int next = separation < 0 ? -1 : qBound(0, separation, 32);
+  if (m_themeSeparation == next) {
+    return;
+  }
+  m_themeSeparation = next;
+  emit themeSeparationChanged();
   scheduleSave();
 }
 
@@ -388,6 +514,21 @@ void AppSettings::setDndHoverSwitchWorkspaceDelayMs(int ms)
   scheduleSave();
 }
 
+bool AppSettings::keepWorkspacesAlive() const
+{
+  return m_keepWorkspacesAlive;
+}
+
+void AppSettings::setKeepWorkspacesAlive(bool enabled)
+{
+  if (m_keepWorkspacesAlive == enabled) {
+    return;
+  }
+  m_keepWorkspacesAlive = enabled;
+  emit keepWorkspacesAliveChanged();
+  scheduleSave();
+}
+
 int AppSettings::webPanelWidth() const
 {
   return m_webPanelWidth;
@@ -468,17 +609,24 @@ void AppSettings::load()
   const QJsonObject obj = doc.object();
 
   const int version = obj.value("version").toInt(1);
-  const bool needsUpgrade = version < 8;
+  const bool needsUpgrade = version < 9;
 
   const int width = obj.value("sidebarWidth").toInt(m_sidebarWidth);
   m_sidebarWidth = qBound(160, width, 520);
   m_sidebarExpanded = obj.value("sidebarExpanded").toBool(m_sidebarExpanded);
+  m_sidebarPanel = obj.value("sidebarPanel").toString(m_sidebarPanel).trimmed();
+  if (m_sidebarPanel.isEmpty()) {
+    m_sidebarPanel = QStringLiteral("tabs");
+  }
+  m_sidebarToolsDocked = obj.value("sidebarToolsDocked").toBool(m_sidebarToolsDocked);
+  m_sidebarHoverExpandEnabled = obj.value("sidebarHoverExpandEnabled").toBool(m_sidebarHoverExpandEnabled);
   m_sidebarOnRight = obj.value("sidebarOnRight").toBool(m_sidebarOnRight);
   m_useSingleToolbar = obj.value("useSingleToolbar").toBool(m_useSingleToolbar);
   m_addressBarVisible = obj.value("addressBarVisible").toBool(m_addressBarVisible);
   m_webSuggestionsEnabled = obj.value("webSuggestionsEnabled").toBool(m_webSuggestionsEnabled);
   m_omniboxActionsEnabled = obj.value("omniboxActionsEnabled").toBool(m_omniboxActionsEnabled);
   m_essentialCloseResets = obj.value("essentialCloseResets").toBool(m_essentialCloseResets);
+  m_globalEssentialsEnabled = obj.value("globalEssentialsEnabled").toBool(m_globalEssentialsEnabled);
   m_compactMode = obj.value("compactMode").toBool(m_compactMode);
   m_reduceMotion = obj.value("reduceMotion").toBool(m_reduceMotion);
   m_lastSeenAppVersion = obj.value("lastSeenAppVersion").toString(m_lastSeenAppVersion).trimmed();
@@ -486,6 +634,11 @@ void AppSettings::load()
   if (m_themeId.isEmpty()) {
     m_themeId = QStringLiteral("workspace");
   }
+  m_themeAccent = parseColorString(obj.value("themeAccent"));
+  const int radius = obj.value("themeRadius").toInt(m_themeRadius);
+  m_themeRadius = radius < 0 ? -1 : qBound(0, radius, 24);
+  const int separation = obj.value("themeSeparation").toInt(m_themeSeparation);
+  m_themeSeparation = separation < 0 ? -1 : qBound(0, separation, 32);
   const bool onboardingSeen = obj.value("onboardingSeen").toBool(m_onboardingSeen);
   m_onboardingSeen = obj.value("firstRunCompleted").toBool(onboardingSeen);
   m_showMenuBar = obj.value("showMenuBar").toBool(m_showMenuBar);
@@ -498,6 +651,7 @@ void AppSettings::load()
     100,
     obj.value("dndHoverSwitchWorkspaceDelayMs").toInt(m_dndHoverSwitchWorkspaceDelayMs),
     2000);
+  m_keepWorkspacesAlive = obj.value("keepWorkspacesAlive").toBool(m_keepWorkspacesAlive);
 
   m_zoomByHost.clear();
   const QJsonValue zoomMapValue = obj.value("zoomByHost");
@@ -542,19 +696,26 @@ bool AppSettings::saveNow(QString* error) const
   }
 
   QJsonObject obj;
-  obj.insert("version", 8);
+  obj.insert("version", 9);
   obj.insert("sidebarWidth", m_sidebarWidth);
   obj.insert("sidebarExpanded", m_sidebarExpanded);
+  obj.insert("sidebarPanel", m_sidebarPanel);
+  obj.insert("sidebarToolsDocked", m_sidebarToolsDocked);
+  obj.insert("sidebarHoverExpandEnabled", m_sidebarHoverExpandEnabled);
   obj.insert("sidebarOnRight", m_sidebarOnRight);
   obj.insert("useSingleToolbar", m_useSingleToolbar);
   obj.insert("addressBarVisible", m_addressBarVisible);
   obj.insert("webSuggestionsEnabled", m_webSuggestionsEnabled);
   obj.insert("omniboxActionsEnabled", m_omniboxActionsEnabled);
   obj.insert("essentialCloseResets", m_essentialCloseResets);
+  obj.insert("globalEssentialsEnabled", m_globalEssentialsEnabled);
   obj.insert("compactMode", m_compactMode);
   obj.insert("reduceMotion", m_reduceMotion);
   obj.insert("lastSeenAppVersion", m_lastSeenAppVersion);
   obj.insert("themeId", m_themeId);
+  obj.insert("themeAccent", m_themeAccent.isValid() ? m_themeAccent.name(QColor::HexRgb) : QString());
+  obj.insert("themeRadius", m_themeRadius);
+  obj.insert("themeSeparation", m_themeSeparation);
   obj.insert("onboardingSeen", m_onboardingSeen);
   obj.insert("firstRunCompleted", m_onboardingSeen);
   obj.insert("showMenuBar", m_showMenuBar);
@@ -563,6 +724,7 @@ bool AppSettings::saveNow(QString* error) const
   obj.insert("rememberZoomPerSite", m_rememberZoomPerSite);
   obj.insert("dndHoverSwitchWorkspaceEnabled", m_dndHoverSwitchWorkspaceEnabled);
   obj.insert("dndHoverSwitchWorkspaceDelayMs", m_dndHoverSwitchWorkspaceDelayMs);
+  obj.insert("keepWorkspacesAlive", m_keepWorkspacesAlive);
 
   QJsonObject zoomMap;
   for (auto it = m_zoomByHost.constBegin(); it != m_zoomByHost.constEnd(); ++it) {

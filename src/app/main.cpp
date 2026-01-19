@@ -42,6 +42,7 @@
 #include "../core/QuickLinksModel.h"
 #include "../core/WebPanelsStore.h"
 #include "../core/ShortcutStore.h"
+#include "../core/SidebarButtonsStore.h"
 #include "../core/SessionStore.h"
 #include "../core/SitePermissionsStore.h"
 #include "../core/SplitViewController.h"
@@ -160,6 +161,39 @@ struct LaunchOptions
   QStringList startupUrls;
   bool incognito = false;
 };
+
+QUrl findReleaseNotesUrl()
+{
+  const QString exeDir = QCoreApplication::applicationDirPath();
+  if (exeDir.isEmpty()) {
+    return {};
+  }
+
+  QDir dir(exeDir);
+
+  const QString direct = dir.filePath(QStringLiteral("CHANGELOG.md"));
+  if (QFileInfo::exists(direct)) {
+    return QUrl::fromLocalFile(direct);
+  }
+
+  const QString packagedDocs = dir.filePath(QStringLiteral("docs/CHANGELOG.md"));
+  if (QFileInfo::exists(packagedDocs)) {
+    return QUrl::fromLocalFile(packagedDocs);
+  }
+
+  QDir candidate = dir;
+  for (int i = 0; i < 5; ++i) {
+    const QString devDocs = candidate.filePath(QStringLiteral("docs/CHANGELOG.md"));
+    if (QFileInfo::exists(devDocs)) {
+      return QUrl::fromLocalFile(devDocs);
+    }
+    if (!candidate.cdUp()) {
+      break;
+    }
+  }
+
+  return {};
+}
 
 QString sanitizeProfileId(const QString& rawId)
 {
@@ -376,6 +410,7 @@ int main(int argc, char* argv[])
   FaviconCache favicons;
   CommandBus commands;
   ShortcutStore shortcutStore;
+  SidebarButtonsStore sidebarButtons;
   NotificationCenter notifications;
   ToastController toast;
   NativeUtils nativeUtils;
@@ -794,7 +829,19 @@ int main(int argc, char* argv[])
     const QString lastSeen = settings->lastSeenAppVersion().trimmed();
 
     if (!currentVersion.isEmpty() && !lastSeen.isEmpty() && lastSeen != currentVersion) {
-      notifications.push(QStringLiteral("Updated to XBrowser %1").arg(currentVersion), QStringLiteral("OK"));
+      const QUrl releaseNotesUrl = findReleaseNotesUrl();
+      if (releaseNotesUrl.isValid()) {
+        QVariantMap args;
+        args.insert(QStringLiteral("url"), releaseNotesUrl);
+        notifications.push(
+          QStringLiteral("Updated to XBrowser %1").arg(currentVersion),
+          QStringLiteral("Release notes"),
+          QString(),
+          QStringLiteral("new-tab"),
+          args);
+      } else {
+        notifications.push(QStringLiteral("Updated to XBrowser %1").arg(currentVersion), QStringLiteral("OK"));
+      }
     }
 
     if (!currentVersion.isEmpty() && lastSeen != currentVersion) {
@@ -812,6 +859,7 @@ int main(int argc, char* argv[])
   engine.rootContext()->setContextProperty("browser", &browser);
   engine.rootContext()->setContextProperty("commands", &commands);
   engine.rootContext()->setContextProperty("shortcutStore", &shortcutStore);
+  engine.rootContext()->setContextProperty("sidebarButtons", &sidebarButtons);
   engine.rootContext()->setContextProperty("notifications", &notifications);
   engine.rootContext()->setContextProperty("toast", &toast);
   engine.rootContext()->setContextProperty("nativeUtils", &nativeUtils);

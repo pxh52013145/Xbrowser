@@ -357,7 +357,8 @@ QVector<ShortcutStore::Entry> ShortcutStore::buildDefaults() const
   };
 
   add(QStringLiteral("focus-address"), QStringLiteral("Navigation"), QStringLiteral("Focus Address Bar"), QStringLiteral("focus-address"), QStringLiteral("Ctrl+L"));
-  add(QStringLiteral("open-tab-switcher"), QStringLiteral("Tabs"), QStringLiteral("Switch Tab"), QStringLiteral("open-tab-switcher"), QStringLiteral("Ctrl+K"));
+  add(QStringLiteral("open-command-palette"), QStringLiteral("Tools"), QStringLiteral("Command Palette"), QStringLiteral("open-command-palette"), QStringLiteral("Ctrl+K"));
+  add(QStringLiteral("open-tab-switcher"), QStringLiteral("Tabs"), QStringLiteral("Switch Tab"), QStringLiteral("open-tab-switcher"), QStringLiteral("Ctrl+Shift+K"));
   add(QStringLiteral("new-tab"), QStringLiteral("Tabs"), QStringLiteral("New Tab"), QStringLiteral("new-tab"), QStringLiteral("Ctrl+T"));
   add(QStringLiteral("new-window"), QStringLiteral("Windows"), QStringLiteral("New Window"), QStringLiteral("new-window"), QStringLiteral("Ctrl+N"));
   add(QStringLiteral("new-incognito-window"), QStringLiteral("Windows"), QStringLiteral("New Incognito Window"), QStringLiteral("new-incognito-window"), QStringLiteral("Ctrl+Shift+N"));

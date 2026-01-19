@@ -1,8 +1,25 @@
 #include "BrowserController.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QSet>
 #include <QVariant>
+
+namespace
+{
+QString normalizeEssentialKey(const QUrl& url)
+{
+  if (!url.isValid() || url.isEmpty()) {
+    return {};
+  }
+
+  const QString s = url.toString(QUrl::FullyEncoded).trimmed();
+  if (s.isEmpty() || s == QStringLiteral("about:blank")) {
+    return {};
+  }
+  return s;
+}
+}
 
 BrowserController::BrowserController(QObject* parent)
   : QObject(parent)
@@ -16,6 +33,7 @@ BrowserController::BrowserController(QObject* parent)
     }
     m_workspaces.setSidebarWidthAt(workspaceIndex, m_settings.sidebarWidth());
     m_workspaces.setSidebarExpandedAt(workspaceIndex, m_settings.sidebarExpanded());
+    m_workspaces.setSidebarPanelAt(workspaceIndex, m_settings.sidebarPanel());
   };
 
   syncSettingsToWorkspace(m_lastWorkspaceIndex);
@@ -26,11 +44,23 @@ BrowserController::BrowserController(QObject* parent)
   connect(&m_settings, &AppSettings::sidebarExpandedChanged, this, [this, syncSettingsToWorkspace] {
     syncSettingsToWorkspace(m_workspaces.activeIndex());
   });
+  connect(&m_settings, &AppSettings::sidebarPanelChanged, this, [this, syncSettingsToWorkspace] {
+    syncSettingsToWorkspace(m_workspaces.activeIndex());
+  });
+  connect(&m_settings, &AppSettings::globalEssentialsEnabledChanged, this, [this] {
+    if (m_settings.globalEssentialsEnabled()) {
+      syncAllGlobalEssentials();
+    }
+  });
 
   connect(&m_workspaces, &QAbstractItemModel::rowsInserted, this, [this](const QModelIndex&, int first, int last) {
     for (int i = first; i <= last; ++i) {
       m_workspaces.setSidebarWidthAt(i, m_settings.sidebarWidth());
       m_workspaces.setSidebarExpandedAt(i, m_settings.sidebarExpanded());
+      m_workspaces.setSidebarPanelAt(i, m_settings.sidebarPanel());
+    }
+    if (m_settings.globalEssentialsEnabled()) {
+      syncAllGlobalEssentials();
     }
   });
 
@@ -43,6 +73,7 @@ BrowserController::BrowserController(QObject* parent)
       if (nextIndex >= 0 && nextIndex < m_workspaces.count()) {
         m_settings.setSidebarWidth(m_workspaces.sidebarWidthAt(nextIndex));
         m_settings.setSidebarExpanded(m_workspaces.sidebarExpandedAt(nextIndex));
+        m_settings.setSidebarPanel(m_workspaces.sidebarPanelAt(nextIndex));
       }
 
       m_lastWorkspaceIndex = nextIndex;
@@ -165,7 +196,18 @@ void BrowserController::toggleTabEssentialById(int tabId)
     return;
   }
 
-  model->setEssentialAt(index, !model->isEssentialAt(index));
+  const bool wasEssential = model->isEssentialAt(index);
+  const bool nextEssential = !wasEssential;
+  const QUrl targetUrl = nextEssential ? model->urlAt(index) : model->initialUrlAt(index);
+  const QUrl fallbackUrl = nextEssential ? targetUrl : model->urlAt(index);
+  const QUrl resolvedUrl = targetUrl.isValid() && !targetUrl.isEmpty() ? targetUrl : fallbackUrl;
+  const QString pageTitle = model->pageTitleAt(index);
+  const QString customTitle = model->customTitleAt(index);
+
+  model->setEssentialAt(index, nextEssential);
+  if (m_settings.globalEssentialsEnabled()) {
+    syncGlobalEssential(resolvedUrl, nextEssential, pageTitle, customTitle);
+  }
 }
 
 void BrowserController::setTabCustomTitleById(int tabId, const QString& title)
@@ -715,6 +757,95 @@ int BrowserController::workspaceIndexForId(int workspaceId) const
     }
   }
   return -1;
+}
+
+void BrowserController::syncGlobalEssential(const QUrl& url, bool essential, const QString& pageTitle, const QString& customTitle)
+{
+  const QString key = normalizeEssentialKey(url);
+  if (key.isEmpty()) {
+    return;
+  }
+
+  for (int ws = 0; ws < m_workspaces.count(); ++ws) {
+    TabModel* tabs = m_workspaces.tabsForIndex(ws);
+    if (!tabs) {
+      continue;
+    }
+
+    if (essential) {
+      bool foundEssential = false;
+      int matchingIndex = -1;
+
+      for (int t = 0; t < tabs->count(); ++t) {
+        if (tabs->isEssentialAt(t) && normalizeEssentialKey(tabs->initialUrlAt(t)) == key) {
+          foundEssential = true;
+          break;
+        }
+        if (matchingIndex < 0 && normalizeEssentialKey(tabs->urlAt(t)) == key) {
+          matchingIndex = t;
+        }
+      }
+
+      if (foundEssential) {
+        continue;
+      }
+
+      if (matchingIndex >= 0) {
+        tabs->setEssentialAt(matchingIndex, true);
+        continue;
+      }
+
+      const int added = tabs->addTabWithId(0, url, pageTitle, false);
+      tabs->setCustomTitleAt(added, customTitle);
+      tabs->setEssentialAt(added, true);
+      tabs->setGroupIdAt(added, 0);
+      continue;
+    }
+
+    for (int t = 0; t < tabs->count(); ++t) {
+      if (!tabs->isEssentialAt(t)) {
+        continue;
+      }
+      if (normalizeEssentialKey(tabs->initialUrlAt(t)) != key) {
+        continue;
+      }
+      tabs->setEssentialAt(t, false);
+    }
+  }
+}
+
+void BrowserController::syncAllGlobalEssentials()
+{
+  QHash<QString, QPair<QUrl, QPair<QString, QString>>> essentials;
+
+  for (int ws = 0; ws < m_workspaces.count(); ++ws) {
+    TabModel* tabs = m_workspaces.tabsForIndex(ws);
+    if (!tabs) {
+      continue;
+    }
+    for (int t = 0; t < tabs->count(); ++t) {
+      if (!tabs->isEssentialAt(t)) {
+        continue;
+      }
+
+      QUrl baseUrl = tabs->initialUrlAt(t);
+      if (!baseUrl.isValid() || baseUrl.isEmpty()) {
+        baseUrl = tabs->urlAt(t);
+      }
+      const QString key = normalizeEssentialKey(baseUrl);
+      if (key.isEmpty()) {
+        continue;
+      }
+      if (essentials.contains(key)) {
+        continue;
+      }
+      essentials.insert(key, qMakePair(baseUrl, qMakePair(tabs->pageTitleAt(t), tabs->customTitleAt(t))));
+    }
+  }
+
+  for (auto it = essentials.constBegin(); it != essentials.constEnd(); ++it) {
+    syncGlobalEssential(it.value().first, true, it.value().second.first, it.value().second.second);
+  }
 }
 
 void BrowserController::moveTabToWorkspace(int tabId, int workspaceIndex)

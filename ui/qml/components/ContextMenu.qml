@@ -14,7 +14,7 @@ Rectangle {
 
     color: Qt.rgba(1, 1, 1, 0.98)
     radius: cornerRadius
-    border.color: Qt.rgba(0, 0, 0, 0.08)
+    border.color: Qt.rgba(0, 0, 0, 0.12)
     border.width: 1
 
     implicitWidth: 280
@@ -54,7 +54,7 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         height: 1
                         visible: !!(modelData && modelData.separator)
-                        color: Qt.rgba(0, 0, 0, 0.08)
+                        color: Qt.rgba(0, 0, 0, 0.12)
                     }
 
                     ItemDelegate {

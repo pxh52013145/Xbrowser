@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QPointer>
 #include <QVariant>
@@ -24,6 +25,17 @@ class SplitViewController : public QObject
   Q_PROPERTY(double gridSplitRatioY READ gridSplitRatioY WRITE setGridSplitRatioY NOTIFY gridSplitRatioYChanged)
 
 public:
+  struct WorkspaceState
+  {
+    bool enabled = false;
+    int paneCount = 2;
+    QVector<int> paneTabIds;
+    int focusedPane = 0;
+    double splitRatio = 0.5;
+    double gridSplitRatioX = 0.5;
+    double gridSplitRatioY = 0.5;
+  };
+
   explicit SplitViewController(QObject* parent = nullptr);
 
   void setBrowser(BrowserController* browser);
@@ -61,6 +73,10 @@ public:
   double gridSplitRatioY() const;
   void setGridSplitRatioY(double ratio);
 
+  WorkspaceState stateForWorkspaceId(int workspaceId) const;
+  void setStateForWorkspaceId(int workspaceId, const WorkspaceState& state);
+  void applyWorkspaceState(int workspaceId);
+
 signals:
   void enabledChanged();
   void tabsChanged();
@@ -70,6 +86,12 @@ signals:
   void gridSplitRatioYChanged();
 
 private:
+  int currentWorkspaceId() const;
+  WorkspaceState captureState() const;
+  void storeStateForWorkspaceId(int workspaceId);
+  void restoreStateForWorkspaceId(int workspaceId);
+  void applyState(const WorkspaceState& state);
+
   void connectTabsModel();
   bool ensureTabs();
   int ensureTabExists();
@@ -85,4 +107,8 @@ private:
   double m_splitRatio = 0.5;
   double m_gridSplitRatioX = 0.5;
   double m_gridSplitRatioY = 0.5;
+
+  int m_activeWorkspaceId = 0;
+  QHash<int, WorkspaceState> m_stateByWorkspaceId;
+  bool m_suppressEnsureTabs = false;
 };

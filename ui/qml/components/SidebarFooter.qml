@@ -9,6 +9,7 @@ Item {
     required property var browser
     required property var workspaces
     required property var settings
+    required property var themes
     required property var popupHost
     required property var popupContextHost
 
@@ -22,9 +23,42 @@ Item {
         anchors.fill: parent
         spacing: theme.spacing
 
+        function buttonColor(active, hovered, enabled) {
+            if (!enabled) {
+                return Qt.rgba(0, 0, 0, 0.02)
+            }
+            if (active) {
+                return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, hovered ? 0.22 : 0.18)
+            }
+            return hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+        }
+
+        function buttonBorder(active, hovered, enabled) {
+            if (!enabled) {
+                return Qt.rgba(0, 0, 0, 0.06)
+            }
+            if (active) {
+                return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35)
+            }
+            return hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08)
+        }
+
+        function buttonRadius() {
+            return Math.max(6, Math.round(theme.cornerRadius * 0.8))
+        }
+
         ToolButton {
             text: settings.sidebarExpanded ? "<" : ">"
             onClicked: commands.invoke("toggle-sidebar")
+            background: Rectangle {
+                radius: row.buttonRadius()
+                color: row.buttonColor(false, parent.hovered, parent.enabled)
+                border.color: row.buttonBorder(false, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: settings.sidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"
         }
 
         ListView {
@@ -58,9 +92,11 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: 10
-                    color: isActive ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.22) : Qt.rgba(0, 0, 0, 0.06)
-                    border.color: isActive ? accentColor : Qt.rgba(0, 0, 0, 0.08)
+                    radius: theme.cornerRadius
+                    color: isActive
+                               ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, hover.hovered ? 0.26 : 0.22)
+                               : (hover.hovered ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(0, 0, 0, 0.04))
+                    border.color: isActive ? accentColor : (hover.hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08))
                     border.width: 1
                 }
 
@@ -103,7 +139,7 @@ Item {
                 }
 
                 ToolTip.visible: hover.hovered
-                ToolTip.delay: 500
+                ToolTip.delay: 300
                 ToolTip.text: name
 
                 HoverHandler {
@@ -232,20 +268,47 @@ Item {
         ToolButton {
             text: "+"
             onClicked: commands.invoke("new-workspace")
+            background: Rectangle {
+                radius: row.buttonRadius()
+                color: row.buttonColor(false, parent.hovered, parent.enabled)
+                border.color: row.buttonBorder(false, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: "New Workspace"
         }
 
         ToolButton {
             id: workspaceMenuButton
-            text: "⋯"
-            onClicked: {
+            text: "\u22EE"
+            onClicked: root.popupContextHost.togglePopupWithContext("sidebar-workspace-menu", () => {
                 root.popupHost.openAtItem(workspaceMenuComponent, workspaceMenuButton)
-                root.popupContextHost.popupManagerContext = "sidebar-workspace-menu"
+            })
+            background: Rectangle {
+                radius: row.buttonRadius()
+                readonly property bool active: root.popupHost.opened && root.popupContextHost && (root.popupContextHost.popupManagerContext === "sidebar-workspace-menu")
+                color: row.buttonColor(active, parent.hovered, parent.enabled)
+                border.color: parent.activeFocus ? theme.accentColor : row.buttonBorder(active, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
             }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: "Workspace Menu"
         }
 
         ToolButton {
             text: "New"
             onClicked: commands.invoke("new-tab", { url: "about:blank" })
+            background: Rectangle {
+                radius: row.buttonRadius()
+                color: row.buttonColor(false, parent.hovered, parent.enabled)
+                border.color: row.buttonBorder(false, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: "New Tab"
         }
     }
 
@@ -255,7 +318,7 @@ Item {
         Rectangle {
             color: Qt.rgba(1, 1, 1, 0.98)
             radius: theme.cornerRadius
-            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.color: Qt.rgba(0, 0, 0, 0.12)
             border.width: 1
 
             implicitWidth: 220
@@ -278,8 +341,23 @@ Item {
                         root.renameDraft = root.workspaces.nameAt(root.renameWorkspaceIndex)
                         root.renameIconTypeDraft = root.workspaces.iconTypeAt(root.renameWorkspaceIndex)
                         root.renameIconValueDraft = root.workspaces.iconValueAt(root.renameWorkspaceIndex)
-                        root.popupContextHost.popupManagerContext = "sidebar-workspace-rename"
-                        root.popupHost.openAtItem(renameDialogComponent, workspaceMenuButton)
+                        root.popupContextHost.openPopupWithContext("sidebar-workspace-rename", () => {
+                            root.popupHost.openAtItem(renameDialogComponent, workspaceMenuButton)
+                        })
+                    }
+                }
+
+                Button {
+                    text: "Theme & Accent"
+                    enabled: root.workspaces.activeIndex >= 0 && !!root.themes
+                    onClicked: {
+                        root.popupHost.close()
+                        if (root.workspaces.activeIndex < 0) {
+                            return
+                        }
+                        root.popupContextHost.openPopupWithContext("sidebar-workspace-theme", () => {
+                            root.popupHost.openAtItem(workspaceThemeDialogComponent, workspaceMenuButton)
+                        })
                     }
                 }
 
@@ -291,8 +369,9 @@ Item {
                         if (root.workspaces.activeIndex < 0) {
                             return
                         }
-                        root.popupContextHost.popupManagerContext = "sidebar-workspace-gradient"
-                        root.popupHost.openAtItem(gradientDialogComponent, workspaceMenuButton)
+                        root.popupContextHost.openPopupWithContext("sidebar-workspace-gradient", () => {
+                            root.popupHost.openAtItem(gradientDialogComponent, workspaceMenuButton)
+                        })
                     }
                 }
 
@@ -325,6 +404,18 @@ Item {
     }
 
     Component {
+        id: workspaceThemeDialogComponent
+
+        WorkspaceThemeDialog {
+            workspaces: root.workspaces
+            themes: root.themes
+            settings: root.settings
+            workspaceIndex: root.workspaces.activeIndex
+            onCloseRequested: root.popupHost.close()
+        }
+    }
+
+    Component {
         id: gradientDialogComponent
 
         GradientGeneratorDialog {
@@ -340,7 +431,7 @@ Item {
         Rectangle {
             color: Qt.rgba(1, 1, 1, 0.98)
             radius: theme.cornerRadius
-            border.color: Qt.rgba(0, 0, 0, 0.08)
+            border.color: Qt.rgba(0, 0, 0, 0.12)
             border.width: 1
 
             implicitWidth: 320

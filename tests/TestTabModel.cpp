@@ -106,6 +106,17 @@ private slots:
     QCOMPARE(model.isEssentialAt(0), true);
   }
 
+  void setEssentialAt_updatesInitialUrlToCurrentUrl()
+  {
+    TabModel model;
+    const int idx = model.addTabWithId(1, QUrl("about:blank"), "New Tab", false);
+    model.setUrlAt(idx, QUrl("https://example.com"));
+
+    QCOMPARE(model.initialUrlAt(idx), QUrl("about:blank"));
+    model.setEssentialAt(idx, true);
+    QCOMPARE(model.initialUrlAt(idx), QUrl("https://example.com"));
+  }
+
   void clear_resetsState()
   {
     TabModel model;

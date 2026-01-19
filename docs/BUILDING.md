@@ -41,7 +41,17 @@ Or double-click: `scripts\\package.cmd`
 
 Output:
 
-- `dist\\Release\\xbrowser.exe`
+- Latest: `dist\\Release\\xbrowser.exe`
+- Versioned copy: `dist\\xbrowser-<version>\\Release\\xbrowser.exe`
+
+The packaged folder also includes `WebView2Loader.dll` (from the pinned WebView2 SDK) so it can run on machines without the SDK installed.
+
+## MSIX / NSIS (optional)
+
+This repo currently ships a **portable folder** (`scripts/package.ps1`). If you need an installer:
+
+- **MSIX**: use `makeappx.exe pack` with the packaged folder as payload, plus your own `AppxManifest.xml` + logo assets; MSIX typically requires signing (or Windows developer mode).
+- **NSIS**: use the packaged folder as the install source; generate shortcuts/uninstall entries as needed.
 
 ## WebView2 SDK notes
 

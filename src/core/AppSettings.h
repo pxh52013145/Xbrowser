@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QColor>
 #include <QHash>
 #include <QTimer>
 #include <QUrl>
@@ -11,6 +12,11 @@ class AppSettings : public QObject
 
   Q_PROPERTY(int sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY sidebarWidthChanged)
   Q_PROPERTY(bool sidebarExpanded READ sidebarExpanded WRITE setSidebarExpanded NOTIFY sidebarExpandedChanged)
+  Q_PROPERTY(QString sidebarPanel READ sidebarPanel WRITE setSidebarPanel NOTIFY sidebarPanelChanged)
+  Q_PROPERTY(bool sidebarToolsDocked READ sidebarToolsDocked WRITE setSidebarToolsDocked NOTIFY sidebarToolsDockedChanged)
+  Q_PROPERTY(
+    bool sidebarHoverExpandEnabled READ sidebarHoverExpandEnabled WRITE setSidebarHoverExpandEnabled NOTIFY
+      sidebarHoverExpandEnabledChanged)
   Q_PROPERTY(bool sidebarOnRight READ sidebarOnRight WRITE setSidebarOnRight NOTIFY sidebarOnRightChanged)
   Q_PROPERTY(bool useSingleToolbar READ useSingleToolbar WRITE setUseSingleToolbar NOTIFY useSingleToolbarChanged)
   Q_PROPERTY(bool addressBarVisible READ addressBarVisible WRITE setAddressBarVisible NOTIFY addressBarVisibleChanged)
@@ -20,11 +26,17 @@ class AppSettings : public QObject
     bool omniboxActionsEnabled READ omniboxActionsEnabled WRITE setOmniboxActionsEnabled NOTIFY omniboxActionsEnabledChanged)
   Q_PROPERTY(
     bool essentialCloseResets READ essentialCloseResets WRITE setEssentialCloseResets NOTIFY essentialCloseResetsChanged)
+  Q_PROPERTY(
+    bool globalEssentialsEnabled READ globalEssentialsEnabled WRITE setGlobalEssentialsEnabled NOTIFY
+      globalEssentialsEnabledChanged)
   Q_PROPERTY(bool compactMode READ compactMode WRITE setCompactMode NOTIFY compactModeChanged)
   Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
   Q_PROPERTY(
     QString lastSeenAppVersion READ lastSeenAppVersion WRITE setLastSeenAppVersion NOTIFY lastSeenAppVersionChanged)
   Q_PROPERTY(QString themeId READ themeId WRITE setThemeId NOTIFY themeIdChanged)
+  Q_PROPERTY(QColor themeAccent READ themeAccent WRITE setThemeAccent NOTIFY themeAccentChanged)
+  Q_PROPERTY(int themeRadius READ themeRadius WRITE setThemeRadius NOTIFY themeRadiusChanged)
+  Q_PROPERTY(int themeSeparation READ themeSeparation WRITE setThemeSeparation NOTIFY themeSeparationChanged)
   Q_PROPERTY(bool onboardingSeen READ onboardingSeen WRITE setOnboardingSeen NOTIFY onboardingSeenChanged)
   Q_PROPERTY(
     bool firstRunCompleted READ firstRunCompleted WRITE setFirstRunCompleted NOTIFY firstRunCompletedChanged)
@@ -41,6 +53,8 @@ class AppSettings : public QObject
   Q_PROPERTY(
     int dndHoverSwitchWorkspaceDelayMs READ dndHoverSwitchWorkspaceDelayMs WRITE setDndHoverSwitchWorkspaceDelayMs NOTIFY
       dndHoverSwitchWorkspaceDelayMsChanged)
+  Q_PROPERTY(
+    bool keepWorkspacesAlive READ keepWorkspacesAlive WRITE setKeepWorkspacesAlive NOTIFY keepWorkspacesAliveChanged)
   Q_PROPERTY(int webPanelWidth READ webPanelWidth WRITE setWebPanelWidth NOTIFY webPanelWidthChanged)
   Q_PROPERTY(bool webPanelVisible READ webPanelVisible WRITE setWebPanelVisible NOTIFY webPanelVisibleChanged)
   Q_PROPERTY(QUrl webPanelUrl READ webPanelUrl WRITE setWebPanelUrl NOTIFY webPanelUrlChanged)
@@ -54,6 +68,15 @@ public:
 
   bool sidebarExpanded() const;
   void setSidebarExpanded(bool expanded);
+
+  QString sidebarPanel() const;
+  void setSidebarPanel(const QString& panelId);
+
+  bool sidebarToolsDocked() const;
+  void setSidebarToolsDocked(bool docked);
+
+  bool sidebarHoverExpandEnabled() const;
+  void setSidebarHoverExpandEnabled(bool enabled);
 
   bool sidebarOnRight() const;
   void setSidebarOnRight(bool onRight);
@@ -73,6 +96,9 @@ public:
   bool essentialCloseResets() const;
   void setEssentialCloseResets(bool enabled);
 
+  bool globalEssentialsEnabled() const;
+  void setGlobalEssentialsEnabled(bool enabled);
+
   bool compactMode() const;
   void setCompactMode(bool enabled);
 
@@ -84,6 +110,15 @@ public:
 
   QString themeId() const;
   void setThemeId(const QString& themeId);
+
+  QColor themeAccent() const;
+  void setThemeAccent(const QColor& accent);
+
+  int themeRadius() const;
+  void setThemeRadius(int radius);
+
+  int themeSeparation() const;
+  void setThemeSeparation(int separation);
 
   bool onboardingSeen() const;
   void setOnboardingSeen(bool seen);
@@ -112,6 +147,9 @@ public:
   int dndHoverSwitchWorkspaceDelayMs() const;
   void setDndHoverSwitchWorkspaceDelayMs(int ms);
 
+  bool keepWorkspacesAlive() const;
+  void setKeepWorkspacesAlive(bool enabled);
+
   int webPanelWidth() const;
   void setWebPanelWidth(int width);
 
@@ -127,16 +165,23 @@ public:
 signals:
   void sidebarWidthChanged();
   void sidebarExpandedChanged();
+  void sidebarPanelChanged();
+  void sidebarToolsDockedChanged();
+  void sidebarHoverExpandEnabledChanged();
   void sidebarOnRightChanged();
   void useSingleToolbarChanged();
   void addressBarVisibleChanged();
   void webSuggestionsEnabledChanged();
   void omniboxActionsEnabledChanged();
   void essentialCloseResetsChanged();
+  void globalEssentialsEnabledChanged();
   void compactModeChanged();
   void reduceMotionChanged();
   void lastSeenAppVersionChanged();
   void themeIdChanged();
+  void themeAccentChanged();
+  void themeRadiusChanged();
+  void themeSeparationChanged();
   void onboardingSeenChanged();
   void firstRunCompletedChanged();
   void showMenuBarChanged();
@@ -145,6 +190,7 @@ signals:
   void rememberZoomPerSiteChanged();
   void dndHoverSwitchWorkspaceEnabledChanged();
   void dndHoverSwitchWorkspaceDelayMsChanged();
+  void keepWorkspacesAliveChanged();
   void webPanelWidthChanged();
   void webPanelVisibleChanged();
   void webPanelUrlChanged();
@@ -157,16 +203,23 @@ private:
 
   int m_sidebarWidth = 260;
   bool m_sidebarExpanded = true;
+  QString m_sidebarPanel = QStringLiteral("tabs");
+  bool m_sidebarToolsDocked = false;
+  bool m_sidebarHoverExpandEnabled = true;
   bool m_sidebarOnRight = false;
   bool m_useSingleToolbar = false;
   bool m_addressBarVisible = true;
   bool m_webSuggestionsEnabled = false;
   bool m_omniboxActionsEnabled = true;
   bool m_essentialCloseResets = false;
+  bool m_globalEssentialsEnabled = false;
   bool m_compactMode = false;
   bool m_reduceMotion = false;
   QString m_lastSeenAppVersion;
   QString m_themeId = QStringLiteral("workspace");
+  QColor m_themeAccent;
+  int m_themeRadius = -1;
+  int m_themeSeparation = -1;
   bool m_onboardingSeen = false;
   bool m_showMenuBar = false;
   bool m_closeTabOnBackNoHistory = true;
@@ -175,6 +228,7 @@ private:
   QHash<QString, qreal> m_zoomByHost;
   bool m_dndHoverSwitchWorkspaceEnabled = true;
   int m_dndHoverSwitchWorkspaceDelayMs = 500;
+  bool m_keepWorkspacesAlive = true;
   int m_webPanelWidth = 360;
   bool m_webPanelVisible = false;
   QUrl m_webPanelUrl = QUrl(QStringLiteral("about:blank"));

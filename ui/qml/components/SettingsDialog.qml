@@ -10,6 +10,7 @@ Item {
     required property var settings
     required property var themes
     required property var bookmarks
+    required property var sidebarButtons
 
     signal closeRequested()
 
@@ -101,8 +102,21 @@ Item {
         }
     }
 
+    Platform.ColorDialog {
+        id: themeAccentDialog
+        title: "Theme accent"
+        modality: Qt.ApplicationModal
+        currentColor: root.settings && root.settings.themeAccent ? root.settings.themeAccent : theme.accentColor
+        onAccepted: {
+            if (root.settings) {
+                root.settings.themeAccent = color
+            }
+        }
+    }
+
     readonly property var sections: [
         { title: "Appearance" },
+        { title: "Sidebar" },
         { title: "Running" },
         { title: "Privacy" },
         { title: "Bookmarks" },
@@ -146,6 +160,7 @@ Item {
 
                         ToolButton {
                             text: "×"
+                            Accessible.name: "Close settings"
                             onClicked: root.closeRequested()
                         }
                     }
@@ -218,6 +233,102 @@ Item {
                                 Button {
                                     text: "Manage…"
                                     onClicked: commands.invoke("open-themes")
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Accent"
+                                    opacity: 0.85
+                                }
+
+                                Rectangle {
+                                    width: 18
+                                    height: 18
+                                    radius: 4
+                                    color: theme.accentColor
+                                    border.color: Qt.rgba(0, 0, 0, 0.18)
+                                    border.width: 1
+                                }
+
+                                Button {
+                                    text: "Pick..."
+                                    enabled: !!root.settings
+                                    onClicked: themeAccentDialog.open()
+                                }
+
+                                Button {
+                                    text: "Reset"
+                                    enabled: !!root.settings
+                                    onClicked: if (root.settings) root.settings.themeAccent = "transparent"
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Corner radius"
+                                    opacity: 0.85
+                                }
+
+                                Slider {
+                                    id: radiusSlider
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 24
+                                    stepSize: 1
+                                    value: root.settings && root.settings.themeRadius >= 0 ? root.settings.themeRadius : theme.cornerRadius
+                                    onMoved: if (root.settings) root.settings.themeRadius = Math.round(value)
+                                }
+
+                                Label {
+                                    text: root.settings && root.settings.themeRadius < 0 ? "Auto" : String(Math.round(radiusSlider.value))
+                                    opacity: 0.75
+                                }
+
+                                Button {
+                                    text: "Reset"
+                                    enabled: !!root.settings
+                                    onClicked: if (root.settings) root.settings.themeRadius = -1
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Separation"
+                                    opacity: 0.85
+                                }
+
+                                Slider {
+                                    id: separationSlider
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: 32
+                                    stepSize: 1
+                                    value: root.settings && root.settings.themeSeparation >= 0 ? root.settings.themeSeparation : theme.spacing
+                                    onMoved: if (root.settings) root.settings.themeSeparation = Math.round(value)
+                                }
+
+                                Label {
+                                    text: root.settings && root.settings.themeSeparation < 0 ? "Auto" : String(Math.round(separationSlider.value))
+                                    opacity: 0.75
+                                }
+
+                                Button {
+                                    text: "Reset"
+                                    enabled: !!root.settings
+                                    onClicked: if (root.settings) root.settings.themeSeparation = -1
                                 }
                             }
 
@@ -358,6 +469,154 @@ Item {
                         }
                     }
 
+                    // Sidebar
+                    Flickable {
+                        clip: true
+                        contentWidth: width
+                        contentHeight: sidebarColumn.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+                        interactive: contentHeight > height
+
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: sidebarColumn
+                            width: parent.width
+                            spacing: theme.spacing
+
+                            Label { text: "Sidebar"; font.bold: true; font.pixelSize: 14 }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Show, hide, and reorder the sidebar buttons."
+                                wrapMode: Text.Wrap
+                                opacity: 0.8
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Dock sidebar tools (instead of popups)"
+                                    checked: root.settings ? root.settings.sidebarToolsDocked : false
+                                    onToggled: if (root.settings) root.settings.sidebarToolsDocked = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Sidebar: hover expand when icon-only"
+                                    checked: root.settings ? root.settings.sidebarHoverExpandEnabled : true
+                                    onToggled: if (root.settings) root.settings.sidebarHoverExpandEnabled = checked
+                                }
+                            }
+
+                            Frame {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(320, buttonsList.contentHeight + theme.spacing * 2)
+
+                                ListView {
+                                    id: buttonsList
+                                    anchors.fill: parent
+                                    clip: true
+                                    model: root.sidebarButtons
+                                    spacing: Math.max(4, Math.round(theme.spacing / 2))
+
+                                    delegate: Item {
+                                        id: row
+                                        width: ListView.view.width
+                                        height: 38
+
+                                        property bool dropActive: false
+
+                                        DragHandler {
+                                            id: drag
+                                            acceptedButtons: Qt.LeftButton
+                                            enabled: !locked
+                                        }
+
+                                        Drag.active: drag.active
+                                        Drag.supportedActions: Qt.MoveAction
+                                        Drag.hotSpot.x: Math.round(width * 0.5)
+                                        Drag.hotSpot.y: Math.round(height * 0.5)
+                                        Drag.keys: ["sidebar-button"]
+                                        Drag.mimeData: ({ fromIndex: index })
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 8
+                                            color: row.dropActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.10) : Qt.rgba(0, 0, 0, 0.03)
+                                            border.color: row.dropActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : Qt.rgba(0, 0, 0, 0.08)
+                                            border.width: 1
+                                        }
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: theme.spacing
+
+                                            Label {
+                                                text: locked ? "•" : "≡"
+                                                opacity: locked ? 0.4 : 0.7
+                                                font.pixelSize: 14
+                                            }
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: title
+                                                elide: Text.ElideRight
+                                            }
+
+                                            CheckBox {
+                                                text: "Show"
+                                                checked: shown
+                                                enabled: !locked
+                                                onToggled: root.sidebarButtons.setVisible(entryId, checked)
+                                            }
+                                        }
+
+                                        DropArea {
+                                            anchors.fill: parent
+                                            keys: ["sidebar-button"]
+                                            onEntered: row.dropActive = true
+                                            onExited: row.dropActive = false
+                                            onDropped: (drop) => {
+                                                row.dropActive = false
+                                                const fromIndex = Number(drop.mimeData.fromIndex)
+                                                if (fromIndex === index) {
+                                                    return
+                                                }
+                                                root.sidebarButtons.move(fromIndex, index)
+                                            }
+                                        }
+                                    }
+
+                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                Button {
+                                    text: "Reset"
+                                    enabled: !!root.sidebarButtons && root.sidebarButtons.resetDefaults
+                                    onClicked: root.sidebarButtons.resetDefaults()
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
+                    }
+
                     // Running
                     Flickable {
                         clip: true
@@ -392,6 +651,18 @@ Item {
                                     text: "Essentials: Close resets (instead of closing)"
                                     checked: root.settings ? root.settings.essentialCloseResets : false
                                     onToggled: if (root.settings) root.settings.essentialCloseResets = checked
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Essentials: Sync across workspaces"
+                                    checked: root.settings ? root.settings.globalEssentialsEnabled : false
+                                    onToggled: if (root.settings) root.settings.globalEssentialsEnabled = checked
                                 }
                             }
 
@@ -440,6 +711,18 @@ Item {
                                 }
 
                                 Label { text: "ms"; opacity: 0.75 }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacing
+
+                                CheckBox {
+                                    Layout.fillWidth: true
+                                    text: "Workspaces: keep tabs loaded when switching"
+                                    checked: root.settings ? root.settings.keepWorkspacesAlive : true
+                                    onToggled: if (root.settings) root.settings.keepWorkspacesAlive = checked
+                                }
                             }
                         }
                     }

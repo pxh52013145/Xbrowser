@@ -91,6 +91,8 @@ private:
 
   void recordRecentlyClosed(const RecentlyClosedTab& tab);
   int workspaceIndexForId(int workspaceId) const;
+  void syncGlobalEssential(const QUrl& url, bool essential, const QString& pageTitle, const QString& customTitle);
+  void syncAllGlobalEssentials();
 
   WorkspaceModel m_workspaces;
   AppSettings m_settings;

@@ -39,6 +39,7 @@ Item {
 
                 ToolButton {
                     text: "×"
+                    Accessible.name: "Close"
                     onClicked: root.closeRequested()
                 }
             }

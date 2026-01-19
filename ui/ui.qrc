@@ -8,6 +8,7 @@
     <file>qml/components/ToolWindowManager.qml</file>
     <file>qml/components/SidebarFooter.qml</file>
     <file>qml/components/GradientGeneratorDialog.qml</file>
+    <file>qml/components/WorkspaceThemeDialog.qml</file>
     <file>qml/components/NotificationsStack.qml</file>
     <file>qml/components/ContextMenu.qml</file>
     <file>qml/components/ThemesDialog.qml</file>

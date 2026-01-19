@@ -189,11 +189,11 @@ void LayoutController::recompute()
   const QString toolCtx = m_toolWindowManagerContext;
   const bool omniboxPopupOpen = popupCtx == QStringLiteral("omnibox");
   const bool anySidebarToolOpen = popupCtx.startsWith(QStringLiteral("sidebar-tool-"));
+  const bool anySidebarWorkspacePopupOpen = popupCtx.startsWith(QStringLiteral("sidebar-workspace-"));
   const bool anySidebarPopupOpen =
     anySidebarToolOpen
     || popupCtx == QStringLiteral("sidebar-context-menu")
-    || popupCtx == QStringLiteral("sidebar-workspace-menu")
-    || popupCtx == QStringLiteral("sidebar-workspace-rename");
+    || anySidebarWorkspacePopupOpen;
   const bool anyTopBarPopupOpen =
     omniboxPopupOpen
     || popupCtx == QStringLiteral("main-menu")

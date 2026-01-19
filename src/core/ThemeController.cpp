@@ -76,6 +76,9 @@ void ThemeController::setSettings(AppSettings* settings)
   m_settings = settings;
   if (m_settings) {
     connect(m_settings, &AppSettings::themeIdChanged, this, &ThemeController::refresh);
+    connect(m_settings, &AppSettings::themeAccentChanged, this, &ThemeController::refresh);
+    connect(m_settings, &AppSettings::themeRadiusChanged, this, &ThemeController::refresh);
+    connect(m_settings, &AppSettings::themeSeparationChanged, this, &ThemeController::refresh);
   }
 
   refresh();
@@ -154,7 +157,13 @@ int ThemeController::motionSlowMs() const
 
 void ThemeController::refresh()
 {
-  const QString themeId = m_settings ? m_settings->themeId() : QStringLiteral("workspace");
+  QString themeId = m_settings ? m_settings->themeId() : QStringLiteral("workspace");
+  if (m_workspaces) {
+    const QString wsOverride = m_workspaces->activeThemeOverride().trimmed();
+    if (!wsOverride.isEmpty()) {
+      themeId = wsOverride;
+    }
+  }
 
   xbrowser::ThemeTokens tokens;
   const bool hasTokens = m_packs && m_packs->tokensForThemeId(themeId, &tokens);
@@ -162,7 +171,10 @@ void ThemeController::refresh()
   const bool themeUsesWorkspaceAccent = !hasTokens || tokens.useWorkspaceAccent || !tokens.accentColor.isValid();
 
   QColor nextAccent("#6d9eeb");
-  if (hasTokens && tokens.accentColor.isValid()) {
+  const QColor overrideAccent = m_settings ? m_settings->themeAccent() : QColor();
+  if (overrideAccent.isValid()) {
+    nextAccent = overrideAccent;
+  } else if (hasTokens && tokens.accentColor.isValid()) {
     nextAccent = tokens.accentColor;
   } else if (m_workspaces) {
     const QColor ws = m_workspaces->activeAccentColor();
@@ -198,8 +210,18 @@ void ThemeController::refresh()
     nextMid = lerpColor(nextFrom, nextTo, 0.5);
   }
 
-  const int nextRadius = qBound(0, hasTokens ? tokens.cornerRadius : 10, 24);
-  const int nextSpacing = qBound(0, hasTokens ? tokens.spacing : 8, 32);
+  int nextRadius = qBound(0, hasTokens ? tokens.cornerRadius : 10, 24);
+  int nextSpacing = qBound(0, hasTokens ? tokens.spacing : 8, 32);
+
+  const int radiusOverride = m_settings ? m_settings->themeRadius() : -1;
+  if (radiusOverride >= 0) {
+    nextRadius = qBound(0, radiusOverride, 24);
+  }
+
+  const int separationOverride = m_settings ? m_settings->themeSeparation() : -1;
+  if (separationOverride >= 0) {
+    nextSpacing = qBound(0, separationOverride, 32);
+  }
 
   if (m_accentColor == nextAccent && m_backgroundFrom == nextFrom && m_backgroundMid == nextMid && m_backgroundTo == nextTo
       && m_backgroundAngle == nextAngle && m_cornerRadius == nextRadius && m_spacing == nextSpacing) {

@@ -59,6 +59,20 @@ ApplicationWindow {
     }
 
     Timer {
+        id: sidebarHoverExpandEnterTimer
+        interval: 120
+        repeat: false
+        onTriggered: root.sidebarHoverExpandActive = true
+    }
+
+    Timer {
+        id: sidebarHoverExpandExitTimer
+        interval: 300
+        repeat: false
+        onTriggered: root.sidebarHoverExpandActive = false
+    }
+
+    Timer {
         id: omniboxUpdateTimer
         interval: 60
         repeat: false
@@ -72,10 +86,24 @@ ApplicationWindow {
     readonly property bool showSidebar: layoutController.showSidebar
 
     readonly property bool sidebarIconOnly: layoutController.sidebarIconOnly
-    property string sidebarPanel: "tabs"
+    property bool sidebarHoverExpandActive: false
+    readonly property bool sidebarHoverExpanded: root.sidebarIconOnly
+                                                 && browser.settings
+                                                 && browser.settings.sidebarHoverExpandEnabled
+                                                 && sidebarHoverExpandActive
+    readonly property bool sidebarShowIconsOnly: root.sidebarIconOnly && !root.sidebarHoverExpanded
+    readonly property int sidebarEffectiveWidth: root.sidebarHoverExpanded ? 260 : (browser.settings ? browser.settings.sidebarWidth : 260)
+    readonly property string effectiveSidebarPanel: (browser.settings && browser.settings.sidebarToolsDocked)
+                                                        ? (browser.settings.sidebarPanel || "tabs")
+                                                        : "tabs"
 
     readonly property int uiRadius: theme.cornerRadius
     readonly property int uiSpacing: theme.spacing
+    readonly property int tooltipDelayMs: 300
+    readonly property int tabRowHeight: 36
+    readonly property int pinnedTabRowHeight: 40
+    readonly property int tabIconSize: 18
+    readonly property int tabActionSize: 24
 
     property string glanceScript: ""
     property var glanceView: null
@@ -119,9 +147,15 @@ ApplicationWindow {
     property int pendingPermissionKind: 0
     property bool pendingPermissionUserInitiated: false
 
+    readonly property int activeWorkspaceId: browser.workspaces
+                                                ? browser.workspaces.workspaceIdAt(browser.workspaces.activeIndex)
+                                                : 0
+
     QtObject {
         id: tabViews
+        property var byWorkspace: ({})
         property var byId: ({})
+        property int activeWorkspaceId: 0
         property int revision: 0
     }
 
@@ -631,10 +665,48 @@ ApplicationWindow {
         view.zoomFactor = desired
     }
 
-    function syncTabViews() {
-        if (!browser.tabs) {
+    function destroyTabViewMap(map) {
+        if (!map) {
             return
         }
+        for (const key in map) {
+            const view = map[key]
+            if (view) {
+                view.destroy()
+            }
+            delete map[key]
+        }
+    }
+
+    function tabViewForWorkspaceTab(workspaceId, tabId) {
+        const wsKey = String(Number(workspaceId || 0))
+        const tabKey = String(Number(tabId || 0))
+        const wsMap = tabViews.byWorkspace[wsKey]
+        return wsMap ? (wsMap[tabKey] || null) : null
+    }
+
+    function syncTabViews() {
+        if (!browser.tabs || !browser.workspaces) {
+            return
+        }
+
+        const wsId = root.activeWorkspaceId
+        const workspaceChanged = tabViews.activeWorkspaceId !== wsId
+        if (workspaceChanged) {
+            if (browser.settings && browser.settings.keepWorkspacesAlive === false) {
+                for (const wsKey in tabViews.byWorkspace) {
+                    destroyTabViewMap(tabViews.byWorkspace[wsKey])
+                }
+                tabViews.byWorkspace = ({})
+            }
+            tabViews.activeWorkspaceId = wsId
+        }
+
+        const wsKey = String(wsId)
+        if (!tabViews.byWorkspace[wsKey]) {
+            tabViews.byWorkspace[wsKey] = ({})
+        }
+        tabViews.byId = tabViews.byWorkspace[wsKey]
 
         const wanted = {}
         for (let i = 0; i < browser.tabs.count(); i++) {
@@ -647,7 +719,7 @@ ApplicationWindow {
             wanted[key] = true
 
             if (!tabViews.byId[tabId]) {
-                const view = tabWebViewComponent.createObject(contentHost, { tabId: tabId })
+                const view = tabWebViewComponent.createObject(contentHost, { tabId: tabId, workspaceId: wsId })
                 if (view) {
                     tabViews.byId[tabId] = view
                 }
@@ -686,8 +758,10 @@ ApplicationWindow {
         if (!anchorItem) {
             return
         }
-        popupManager.openAtItem(extensionsPanelComponent, anchorItem)
-        root.popupManagerContext = "extensions-panel"
+
+        root.togglePopupWithContext("extensions-panel", () => {
+            popupManager.openAtItem(extensionsPanelComponent, anchorItem)
+        })
     }
 
     function openExtensionPopup(anchorItem, extensionId, name, popupUrl, optionsUrl) {
@@ -708,13 +782,61 @@ ApplicationWindow {
             anchorItem = extensionsButton
         }
 
+        const ctx = "extension-popup"
+        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
+        if (hasPopup && root.popupManagerContext === ctx && root.extensionPopupExtensionId === id) {
+            popupManager.close()
+            return
+        }
+
+        if (hasPopup) {
+            popupManager.close()
+        }
+
         extensionPopupExtensionId = id
         extensionPopupName = String(name || id || "Extension")
         extensionPopupUrl = popup
         extensionPopupOptionsUrl = options
 
-        popupManager.openAtItem(extensionPopupComponent, anchorItem)
-        root.popupManagerContext = "extension-popup"
+        root.openPopupWithContext(ctx, () => {
+            popupManager.openAtItem(extensionPopupComponent, anchorItem)
+        })
+    }
+
+    function openPopupWithContext(contextId, openFn) {
+        const ctx = String(contextId || "").trim()
+        if (!ctx || !openFn) {
+            return
+        }
+
+        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
+        if (hasPopup) {
+            popupManager.close()
+        }
+
+        root.popupManagerContext = ctx
+        Qt.callLater(() => {
+            if (root.popupManagerContext !== ctx) {
+                return
+            }
+            openFn()
+            root.popupManagerContext = ctx
+        })
+    }
+
+    function togglePopupWithContext(contextId, openFn) {
+        const ctx = String(contextId || "").trim()
+        if (!ctx || !openFn) {
+            return
+        }
+
+        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
+        if (hasPopup && root.popupManagerContext === ctx) {
+            popupManager.close()
+            return
+        }
+
+        root.openPopupWithContext(ctx, openFn)
     }
 
     function toggleTopBarPopup(contextId, component, anchorItem) {
@@ -722,70 +844,45 @@ ApplicationWindow {
         if (!ctx || !component || !anchorItem) {
             return
         }
-
-        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
-        if (hasPopup && root.popupManagerContext === ctx) {
-            popupManager.close()
-            return
-        }
-
-        if (hasPopup) {
-            popupManager.close()
-        }
-
-        root.popupManagerContext = ctx
-        Qt.callLater(() => {
-            if (root.popupManagerContext !== ctx) {
-                return
-            }
+        root.togglePopupWithContext(ctx, () => {
             popupManager.openAtItem(component, anchorItem)
-            root.popupManagerContext = ctx
         })
     }
 
     function toggleTabSwitcherPopup() {
         const ctx = "tab-switcher"
-
-        const hasPopup = popupManager.opened || popupManager.pendingOpen || popupManager.popupItem
-        if (hasPopup && root.popupManagerContext === ctx) {
-            popupManager.close()
-            return
-        }
-
-        if (hasPopup) {
-            popupManager.close()
-        }
-
-        root.popupManagerContext = ctx
-        Qt.callLater(() => {
-            if (root.popupManagerContext !== ctx) {
-                return
-            }
+        root.togglePopupWithContext(ctx, () => {
             const w = 620
             const x = Math.max(8, Math.round((root.width - w) / 2))
             const y = Math.round(topBar.height + 24)
             popupManager.openAtPoint(tabSwitcherComponent, x, y, root)
-            root.popupManagerContext = ctx
         })
     }
 
     function toggleSidebarToolPopup(toolId, component, anchorItem) {
-        if (!component || !anchorItem) {
+        const id = String(toolId || "").trim()
+        if (!id || !component || !anchorItem) {
             return
         }
 
-        const ctx = "sidebar-tool-" + String(toolId || "")
-        if (popupManager.opened && root.popupManagerContext === ctx) {
-            popupManager.close()
+        if (browser.settings && browser.settings.sidebarToolsDocked) {
+            if (popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")) {
+                popupManager.close()
+            }
+            if (browser.settings.sidebarPanel !== id) {
+                browser.settings.sidebarPanel = id
+            }
             return
         }
 
-        const anchorPos = anchorItem.mapToItem(popupManager, 0, 0)
-        const sidebarPos = sidebarPane ? sidebarPane.mapToItem(popupManager, sidebarPane.width, 0) : ({ x: 0, y: 0 })
-        const gap = 8
-        const ax = Math.max(0, Math.round((sidebarPos.x + gap) - anchorPos.x))
-        popupManager.openAtItem(component, anchorItem, null, ax, anchorItem.height)
-        root.popupManagerContext = ctx
+        const ctx = "sidebar-tool-" + id
+        root.togglePopupWithContext(ctx, () => {
+            const anchorPos = anchorItem.mapToItem(popupManager, 0, 0)
+            const sidebarPos = sidebarPane ? sidebarPane.mapToItem(popupManager, sidebarPane.width, 0) : ({ x: 0, y: 0 })
+            const gap = 8
+            const ax = Math.max(0, Math.round((sidebarPos.x + gap) - anchorPos.x))
+            popupManager.openAtItem(component, anchorItem, null, ax, anchorItem.height)
+        })
     }
 
     function openWebPanel(url, title) {
@@ -936,10 +1033,16 @@ ApplicationWindow {
             return
         }
 
-        for (const key in tabViews.byId) {
-            const view = tabViews.byId[key]
-            if (view && view.setUserCss) {
-                view.setUserCss(css)
+        for (const wsKey in tabViews.byWorkspace) {
+            const map = tabViews.byWorkspace[wsKey]
+            if (!map) {
+                continue
+            }
+            for (const key in map) {
+                const view = map[key]
+                if (view && view.setUserCss) {
+                    view.setUserCss(css)
+                }
             }
         }
 
@@ -970,23 +1073,23 @@ ApplicationWindow {
         }
     }
 
-    function downloadOpKey(tabId, downloadOperationId) {
-        return String(tabId) + ":" + String(downloadOperationId)
+    function downloadOpKey(workspaceId, tabId, downloadOperationId) {
+        return String(workspaceId) + ":" + String(tabId) + ":" + String(downloadOperationId)
     }
 
-    function handleDownloadStarted(tabId, downloadOperationId, uri, resultFilePath, totalBytes) {
+    function handleDownloadStarted(workspaceId, tabId, downloadOperationId, uri, resultFilePath, totalBytes) {
         const downloadId = downloads.addStarted(uri, resultFilePath)
         if (downloadId > 0) {
-            const key = downloadOpKey(tabId, downloadOperationId)
+            const key = downloadOpKey(workspaceId, tabId, downloadOperationId)
             activeDownloadIdByKey[key] = downloadId
-            activeDownloadOpById[downloadId] = { tabId: tabId, opId: downloadOperationId }
+            activeDownloadOpById[downloadId] = { workspaceId: workspaceId, tabId: tabId, opId: downloadOperationId }
             downloads.updateProgress(downloadId, 0, Number(totalBytes || 0), false, false, "")
         }
         toast.showToast("Download started", "Downloads", "open-downloads", 3500)
     }
 
-    function handleDownloadProgress(tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason) {
-        const key = downloadOpKey(tabId, downloadOperationId)
+    function handleDownloadProgress(workspaceId, tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason) {
+        const key = downloadOpKey(workspaceId, tabId, downloadOperationId)
         const downloadId = Number(activeDownloadIdByKey[key] || 0)
         if (downloadId > 0) {
             downloads.updateProgress(
@@ -999,8 +1102,8 @@ ApplicationWindow {
         }
     }
 
-    function handleDownloadFinished(tabId, downloadOperationId, uri, resultFilePath, success, interruptReason) {
-        const key = downloadOpKey(tabId, downloadOperationId)
+    function handleDownloadFinished(workspaceId, tabId, downloadOperationId, uri, resultFilePath, success, interruptReason) {
+        const key = downloadOpKey(workspaceId, tabId, downloadOperationId)
         const downloadId = Number(activeDownloadIdByKey[key] || 0)
         if (downloadId > 0) {
             delete activeDownloadIdByKey[key]
@@ -1027,7 +1130,7 @@ ApplicationWindow {
         if (!op) {
             return
         }
-        const view = tabViews.byId[Number(op.tabId || 0)]
+        const view = tabViewForWorkspaceTab(op.workspaceId, op.tabId)
         if (view && view.pauseDownload) {
             view.pauseDownload(Number(op.opId || 0))
         }
@@ -1038,7 +1141,7 @@ ApplicationWindow {
         if (!op) {
             return
         }
-        const view = tabViews.byId[Number(op.tabId || 0)]
+        const view = tabViewForWorkspaceTab(op.workspaceId, op.tabId)
         if (view && view.resumeDownload) {
             view.resumeDownload(Number(op.opId || 0))
         }
@@ -1049,7 +1152,7 @@ ApplicationWindow {
         if (!op) {
             return
         }
-        const view = tabViews.byId[Number(op.tabId || 0)]
+        const view = tabViewForWorkspaceTab(op.workspaceId, op.tabId)
         if (view && view.cancelDownload) {
             view.cancelDownload(Number(op.opId || 0))
         }
@@ -1112,9 +1215,10 @@ ApplicationWindow {
 
         const x = Number(info.x || 0)
         const y = Number(info.y || 0)
-        const pos = root.contentItem.mapToItem(popupManager, x, y)
-        popupManager.openAtPoint(webContextMenuComponent, pos.x, pos.y)
-        popupManagerContext = "web-context-menu"
+        root.openPopupWithContext("web-context-menu", () => {
+            const pos = root.contentItem.mapToItem(popupManager, x, y)
+            popupManager.openAtPoint(webContextMenuComponent, pos.x, pos.y)
+        })
     }
 
     function handleWebContextMenuAction(action) {
@@ -1390,9 +1494,13 @@ ApplicationWindow {
             for (const id of tabIds) {
                 const tabId = Number(id)
                 const idx = browser.tabs.indexOfTabId(tabId)
-                if (idx >= 0) {
-                    browser.tabs.setEssentialAt(idx, essential)
+                if (idx < 0) {
+                    continue
                 }
+                if (browser.tabs.isEssentialAt(idx) === essential) {
+                    continue
+                }
+                commands.invoke("toggle-essential", { tabId: tabId })
             }
             return
         }
@@ -1542,15 +1650,16 @@ ApplicationWindow {
         pendingPermissionKind = Number(kind || 0)
         pendingPermissionUserInitiated = userInitiated === true
 
-        if (!showTopBar || !sitePanelButton.visible) {
-            const x = Math.round(root.contentItem.width * 0.5 - 160)
-            const y = 56
-            const pos = root.contentItem.mapToItem(popupManager, x, y)
-            popupManager.openAtPoint(permissionDoorhangerComponent, pos.x, pos.y)
-        } else {
-            popupManager.openAtItem(permissionDoorhangerComponent, sitePanelButton)
-        }
-        popupManagerContext = "permission-doorhanger"
+        root.openPopupWithContext("permission-doorhanger", () => {
+            if (!showTopBar || !sitePanelButton.visible) {
+                const x = Math.round(root.contentItem.width * 0.5 - 160)
+                const y = 56
+                const pos = root.contentItem.mapToItem(popupManager, x, y)
+                popupManager.openAtPoint(permissionDoorhangerComponent, pos.x, pos.y)
+            } else {
+                popupManager.openAtItem(permissionDoorhangerComponent, sitePanelButton)
+            }
+        })
     }
 
     function omniboxPopupOpen() {
@@ -1573,8 +1682,9 @@ ApplicationWindow {
         }
 
         const pos = field.mapToItem(popupManager, 0, field.height)
-        popupManager.openAtPoint(omniboxPopupComponent, pos.x, pos.y)
-        root.popupManagerContext = "omnibox"
+        root.openPopupWithContext("omnibox", () => {
+            popupManager.openAtPoint(omniboxPopupComponent, pos.x, pos.y)
+        })
     }
 
     function closeOmniboxPopup() {
@@ -1639,7 +1749,7 @@ ApplicationWindow {
                 { group: "Tabs", title: "Close Tab", command: "close-tab", args: { tabId: root.focusedTabId }, shortcut: "Ctrl+W" },
                 { group: "Tabs", title: "Restore Closed Tab", command: "restore-closed-tab", args: {}, shortcut: "Ctrl+Shift+T" },
                 { group: "Tabs", title: "Duplicate Tab", command: "duplicate-tab", args: { tabId: root.focusedTabId }, shortcut: "" },
-                { group: "Tabs", title: "Switch Tab", command: "open-tab-switcher", args: {}, shortcut: "Ctrl+K" },
+                { group: "Tabs", title: "Switch Tab", command: "open-tab-switcher", args: {}, shortcut: "Ctrl+Shift+K" },
                 { group: "Navigation", title: "Reload", command: "nav-reload", args: {}, shortcut: "Ctrl+R" },
                 { group: "Navigation", title: "Stop Loading", command: "nav-stop", args: {}, shortcut: "Esc" },
                 { group: "Navigation", title: "Find in Page", command: "open-find", args: {}, shortcut: "Ctrl+F" },
@@ -2715,6 +2825,7 @@ ApplicationWindow {
             ToolButton {
                 id: sidebarButton
                 visible: showTopBar
+                Accessible.name: "Toggle sidebar"
                 text: browser.settings.sidebarExpanded ? "<" : ">"
                 onClicked: commands.invoke("toggle-sidebar")
             }
@@ -2722,6 +2833,7 @@ ApplicationWindow {
             ToolButton {
                 id: backButton
                 visible: showTopBar
+                Accessible.name: "Back"
                 text: "←"
                 enabled: root.focusedView ? root.focusedView.canGoBack : false
                 onClicked: commands.invoke("nav-back")
@@ -2729,6 +2841,7 @@ ApplicationWindow {
             ToolButton {
                 id: forwardButton
                 visible: showTopBar
+                Accessible.name: "Forward"
                 text: "→"
                 enabled: root.focusedView ? root.focusedView.canGoForward : false
                 onClicked: commands.invoke("nav-forward")
@@ -2736,6 +2849,7 @@ ApplicationWindow {
             ToolButton {
                 id: reloadButton
                 visible: showTopBar
+                Accessible.name: (root.focusedView && root.focusedView.isLoading) ? "Stop loading" : "Reload"
                 text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
                 onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
             }
@@ -2743,6 +2857,7 @@ ApplicationWindow {
             ToolButton {
                 id: sitePanelButton
                 visible: showTopBar
+                Accessible.name: "Site information"
                 text: "ⓘ"
                 onClicked: root.toggleTopBarPopup("site-panel", sitePanelComponent, sitePanelButton)
             }
@@ -2750,12 +2865,20 @@ ApplicationWindow {
             TextField {
                 id: addressField
                 visible: showTopBar
+                Accessible.name: "Address bar"
+                activeFocusOnTab: true
                 Layout.fillWidth: true
                 Layout.minimumWidth: 240
                 Layout.preferredWidth: 640
                 Layout.maximumWidth: 800
                 placeholderText: "Search or enter address"
                 selectByMouse: true
+                background: Rectangle {
+                    radius: theme.cornerRadius
+                    color: Qt.rgba(1, 1, 1, 0.96)
+                    border.color: addressField.activeFocus ? theme.accentColor : Qt.rgba(0, 0, 0, 0.18)
+                    border.width: addressField.activeFocus ? 2 : 1
+                }
                 onTextChanged: scheduleOmniboxUpdate()
                 onActiveFocusChanged: {
                     root.syncAddressFocusState()
@@ -3026,9 +3149,12 @@ ApplicationWindow {
                             anchors.fill: parent
                             acceptedButtons: Qt.RightButton
                             onClicked: (mouse) => {
-                                const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                popupManager.openAtPoint(extensionContextMenuComponent, pos.x, pos.y)
-                                root.popupManagerContext = "extensions-context-menu"
+                                const mx = mouse.x
+                                const my = mouse.y
+                                root.openPopupWithContext("extensions-context-menu", () => {
+                                    const pos = pinnedExtensionButton.mapToItem(popupManager, mx, my)
+                                    popupManager.openAtPoint(extensionContextMenuComponent, pos.x, pos.y)
+                                })
                             }
                         }
                     }
@@ -3649,15 +3775,15 @@ ApplicationWindow {
         columnSpacing: 0
         rowSpacing: 0
 
-        Rectangle {
-            id: sidebarPane
-            Layout.column: browser.settings.sidebarOnRight ? 4 : 0
-            Layout.preferredWidth: showSidebar ? browser.settings.sidebarWidth : 0
-            Layout.fillHeight: true
-            visible: true
-            opacity: showSidebar ? 1.0 : 0.0
-            clip: true
-            color: Qt.rgba(0, 0, 0, 0.04)
+            Rectangle {
+                id: sidebarPane
+                Layout.column: browser.settings.sidebarOnRight ? 4 : 0
+                Layout.preferredWidth: showSidebar ? root.sidebarEffectiveWidth : 0
+                Layout.fillHeight: true
+                visible: true
+                opacity: showSidebar ? 1.0 : 0.0
+                clip: true
+                color: Qt.rgba(0, 0, 0, 0.04)
 
             Behavior on Layout.preferredWidth {
                 NumberAnimation {
@@ -3674,7 +3800,24 @@ ApplicationWindow {
             }
 
             HoverHandler {
-                onHoveredChanged: layoutController.sidebarHovered = hovered
+                onHoveredChanged: {
+                    layoutController.sidebarHovered = hovered
+
+                    if (!browser.settings.sidebarHoverExpandEnabled || !root.sidebarIconOnly) {
+                        sidebarHoverExpandEnterTimer.stop()
+                        sidebarHoverExpandExitTimer.stop()
+                        root.sidebarHoverExpandActive = false
+                        return
+                    }
+
+                    if (hovered) {
+                        sidebarHoverExpandExitTimer.stop()
+                        sidebarHoverExpandEnterTimer.restart()
+                    } else {
+                        sidebarHoverExpandEnterTimer.stop()
+                        sidebarHoverExpandExitTimer.restart()
+                    }
+                }
             }
 
             ColumnLayout {
@@ -3688,16 +3831,19 @@ ApplicationWindow {
                     visible: root.singleToolbarActive() && browser.settings.addressBarVisible
 
                     ToolButton {
+                        Accessible.name: "Back"
                         text: "←"
                         enabled: root.focusedView ? root.focusedView.canGoBack : false
                         onClicked: commands.invoke("nav-back")
                     }
                     ToolButton {
+                        Accessible.name: "Forward"
                         text: "→"
                         enabled: root.focusedView ? root.focusedView.canGoForward : false
                         onClicked: commands.invoke("nav-forward")
                     }
                     ToolButton {
+                        Accessible.name: (root.focusedView && root.focusedView.isLoading) ? "Stop loading" : "Reload"
                         text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
                         onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
                     }
@@ -3705,8 +3851,16 @@ ApplicationWindow {
                     TextField {
                         id: sidebarAddressField
                         Layout.fillWidth: true
+                        Accessible.name: "Address bar"
+                        activeFocusOnTab: true
                         placeholderText: "Search or enter address"
                         selectByMouse: true
+                        background: Rectangle {
+                            radius: theme.cornerRadius
+                            color: Qt.rgba(1, 1, 1, 0.96)
+                            border.color: sidebarAddressField.activeFocus ? theme.accentColor : Qt.rgba(0, 0, 0, 0.18)
+                            border.width: sidebarAddressField.activeFocus ? 2 : 1
+                        }
                         onTextChanged: scheduleOmniboxUpdate()
                         onActiveFocusChanged: {
                             root.syncAddressFocusState()
@@ -3793,125 +3947,164 @@ ApplicationWindow {
                         text: Math.round((root.focusedView.zoomFactor || 1.0) * 100) + "%"
                         onClicked: commands.invoke("zoom-reset")
                         ToolTip.visible: hovered
-                        ToolTip.delay: 500
+                        ToolTip.delay: 300
                         ToolTip.text: "Reset zoom"
                     }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: Math.max(4, Math.round(theme.spacing / 2))
 
-                    function buttonColor(active) {
-                        return active ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.16) : Qt.rgba(0, 0, 0, 0.04)
+                    function buttonColor(active, hovered, enabled) {
+                        if (!enabled) {
+                            return Qt.rgba(0, 0, 0, 0.02)
+                        }
+                        if (active) {
+                            return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, hovered ? 0.22 : 0.18)
+                        }
+                        return hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
                     }
 
-                    function buttonBorder(active) {
-                        return active ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : Qt.rgba(0, 0, 0, 0.08)
+                    function buttonBorder(active, hovered, enabled) {
+                        if (!enabled) {
+                            return Qt.rgba(0, 0, 0, 0.06)
+                        }
+                        if (active) {
+                            return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35)
+                        }
+                        return hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08)
                     }
 
-                    ToolButton {
-                        id: sidebarTabsButton
-                        text: root.sidebarIconOnly ? "T" : "Tabs"
-                        onClicked: {
+                    function buttonRadius() {
+                        return Math.max(6, Math.round(root.uiRadius * 0.8))
+                    }
+
+                    function iconTextForId(buttonId) {
+                        const id = String(buttonId || "").trim()
+                        if (id === "tabs") {
+                            return "T"
+                        }
+                        if (id === "bookmarks") {
+                            return "\u2605"
+                        }
+                        if (id === "history") {
+                            return "H"
+                        }
+                        if (id === "downloads") {
+                            return "D"
+                        }
+                        if (id === "panels") {
+                            return "P"
+                        }
+                        if (id === "extensions") {
+                            return "E"
+                        }
+                        return id.length > 0 ? id[0].toUpperCase() : "?"
+                    }
+
+                    function enabledForId(buttonId) {
+                        const id = String(buttonId || "").trim()
+                        if (id === "extensions") {
+                            return extensions && extensions.ready === true
+                        }
+                        if (id === "panels") {
+                            return root.webPanelsModel !== null && root.webPanelsModel !== undefined
+                        }
+                        return true
+                    }
+
+                    function activeForId(buttonId) {
+                        const id = String(buttonId || "").trim()
+                        if (id === "tabs") {
+                            return root.effectiveSidebarPanel === "tabs" && !(popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-"))
+                        }
+                        if (browser.settings && browser.settings.sidebarToolsDocked) {
+                            return String(browser.settings.sidebarPanel || "").trim() === id
+                        }
+                        return root.popupManagerContext === ("sidebar-tool-" + id)
+                    }
+
+                    function popupComponentForId(buttonId) {
+                        const id = String(buttonId || "").trim()
+                        if (id === "bookmarks") {
+                            return sidebarBookmarksPopupComponent
+                        }
+                        if (id === "history") {
+                            return sidebarHistoryPopupComponent
+                        }
+                        if (id === "downloads") {
+                            return sidebarDownloadsPopupComponent
+                        }
+                        if (id === "panels") {
+                            return sidebarPanelsPopupComponent
+                        }
+                        if (id === "extensions") {
+                            return sidebarExtensionsPopupComponent
+                        }
+                        return null
+                    }
+
+                    function handleToolClick(buttonId, anchorItem) {
+                        const id = String(buttonId || "").trim()
+                        if (!id || !anchorItem) {
+                            return
+                        }
+
+                        if (id === "tabs") {
                             if (popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")) {
                                 popupManager.close()
                             }
-                        }
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(!(popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")))
-                            border.color: buttonBorder(!(popupManager.opened && root.popupManagerContext.startsWith("sidebar-tool-")))
-                            border.width: 1
-                        }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "Tabs"
-                    }
-
-                    ToolButton {
-                        id: sidebarBookmarksButton
-                        text: root.sidebarIconOnly ? "\u2605" : "Bookmarks"
-                        onClicked: root.toggleSidebarToolPopup("bookmarks", sidebarBookmarksPopupComponent, sidebarBookmarksButton)
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(root.popupManagerContext === "sidebar-tool-bookmarks")
-                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-bookmarks")
-                            border.width: 1
-                        }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "Bookmarks"
-                    }
-
-                    ToolButton {
-                        id: sidebarHistoryButton
-                        text: root.sidebarIconOnly ? "H" : "History"
-                        onClicked: root.toggleSidebarToolPopup("history", sidebarHistoryPopupComponent, sidebarHistoryButton)
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(root.popupManagerContext === "sidebar-tool-history")
-                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-history")
-                            border.width: 1
-                        }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "History"
-                    }
-
-                    ToolButton {
-                        id: sidebarDownloadsButton
-                        text: root.sidebarIconOnly ? "D" : "Downloads"
-                        onClicked: root.toggleSidebarToolPopup("downloads", sidebarDownloadsPopupComponent, sidebarDownloadsButton)
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(root.popupManagerContext === "sidebar-tool-downloads")
-                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-downloads")
-                            border.width: 1
-
-                            Downloads.DownloadAnimation {
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 3
-                                downloads: root.downloadsModel
-                                reduceMotion: browser.settings.reduceMotion
+                            if (browser.settings.sidebarToolsDocked && browser.settings.sidebarPanel !== "tabs") {
+                                browser.settings.sidebarPanel = "tabs"
                             }
+                            return
                         }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "Downloads"
+
+                        const component = popupComponentForId(id)
+                        if (!component) {
+                            return
+                        }
+                        root.toggleSidebarToolPopup(id, component, anchorItem)
                     }
 
-                    ToolButton {
-                        id: sidebarPanelsButton
-                        text: root.sidebarIconOnly ? "P" : "Panels"
-                        enabled: root.webPanelsModel !== null && root.webPanelsModel !== undefined
-                        onClicked: root.toggleSidebarToolPopup("panels", sidebarPanelsPopupComponent, sidebarPanelsButton)
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(root.popupManagerContext === "sidebar-tool-panels")
-                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-panels")
-                            border.width: 1
-                        }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "Panels"
-                    }
+                    Repeater {
+                        model: sidebarButtons
 
-                    ToolButton {
-                        id: sidebarExtensionsButton
-                        text: root.sidebarIconOnly ? "E" : "Extensions"
-                        enabled: extensions && extensions.ready === true
-                        onClicked: root.toggleSidebarToolPopup("extensions", sidebarExtensionsPopupComponent, sidebarExtensionsButton)
-                        background: Rectangle {
-                            radius: 8
-                            color: buttonColor(root.popupManagerContext === "sidebar-tool-extensions")
-                            border.color: buttonBorder(root.popupManagerContext === "sidebar-tool-extensions")
-                            border.width: 1
+                        delegate: ToolButton {
+                            id: sidebarToolButton
+                            required property string entryId
+                            required property string title
+                            required property bool shown
+                            required property bool locked
+
+                            visible: shown
+                            Accessible.name: title
+                            text: root.sidebarShowIconsOnly ? iconTextForId(entryId) : title
+                            enabled: enabledForId(entryId)
+                            onClicked: handleToolClick(entryId, sidebarToolButton)
+
+                            background: Rectangle {
+                                radius: buttonRadius()
+                                readonly property bool active: activeForId(entryId)
+                                color: buttonColor(active, parent.hovered, parent.enabled)
+                                border.color: parent.activeFocus ? theme.accentColor : buttonBorder(active, parent.hovered, parent.enabled)
+                                border.width: parent.activeFocus ? 2 : 1
+
+                                Downloads.DownloadAnimation {
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 3
+                                    downloads: root.downloadsModel
+                                    reduceMotion: browser.settings.reduceMotion
+                                    visible: entryId === "downloads"
+                                }
+                            }
+
+                            ToolTip.visible: hovered
+                            ToolTip.delay: root.tooltipDelayMs
+                            ToolTip.text: title
                         }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "Extensions"
                     }
 
                     Item { Layout.fillWidth: true }
@@ -3932,25 +4125,58 @@ ApplicationWindow {
                     groupId: 0
                 }
 
-                Label {
-                    text: "Essentials"
-                    font.pixelSize: 12
-                    opacity: 0.7
-                    visible: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && essentialsView.count > 0
+                Loader {
+                    id: sidebarDockedPanel
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    active: browser.settings.sidebarToolsDocked && root.effectiveSidebarPanel !== "tabs"
+                    visible: active
+
+                    sourceComponent: {
+                        if (!browser.settings.sidebarToolsDocked) {
+                            return null
+                        }
+
+                        const panelId = String(browser.settings.sidebarPanel || "").trim()
+                        if (panelId === "bookmarks") {
+                            return sidebarBookmarksPanelComponent
+                        }
+                        if (panelId === "history") {
+                            return sidebarHistoryPanelComponent
+                        }
+                        if (panelId === "downloads") {
+                            return sidebarDownloadsPanelComponent
+                        }
+                        if (panelId === "panels") {
+                            return sidebarPanelsPanelComponent
+                        }
+                        if (panelId === "extensions") {
+                            return sidebarExtensionsPanelComponent
+                        }
+                        return null
+                    }
                 }
 
-                GridView {
-                    id: essentialsGrid
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
-                    clip: true
-                    model: essentialsTabs
-                    readonly property bool active: root.sidebarPanel === "tabs" && root.sidebarIconOnly && count > 0
-                    visible: active
-                    activeFocusOnTab: true
-                    currentIndex: -1
-                    cellWidth: 40
-                    cellHeight: 40
+                    Label {
+                        text: "Essentials"
+                        font.pixelSize: 12
+                        opacity: 0.7
+                        visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly && essentialsView.count > 0
+                    }
+
+                    GridView {
+                        id: essentialsGrid
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
+                        clip: true
+                        model: essentialsTabs
+                        Accessible.name: "Essential tabs"
+                        readonly property bool active: root.effectiveSidebarPanel === "tabs" && root.sidebarShowIconsOnly && count > 0
+                        visible: active
+                        activeFocusOnTab: true
+                        currentIndex: -1
+                        cellWidth: 40
+                        cellHeight: 40
                     property int selectionAnchorIndex: -1
 
                     Keys.onPressed: (event) => {
@@ -4007,7 +4233,7 @@ ApplicationWindow {
                         }
 
                         ToolTip.visible: hovered
-                        ToolTip.delay: 500
+                        ToolTip.delay: root.tooltipDelayMs
                         ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
 
                         TapHandler {
@@ -4062,7 +4288,8 @@ ApplicationWindow {
                     Layout.preferredHeight: active ? Math.min(contentHeight, 120) : 0
                     clip: true
                     model: essentialsTabs
-                    readonly property bool active: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && count > 0
+                    Accessible.name: "Essential tabs"
+                    readonly property bool active: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly && count > 0
                     visible: active
                     activeFocusOnTab: true
                     currentIndex: -1
@@ -4173,8 +4400,9 @@ ApplicationWindow {
                         width: ListView.view.width
                         text: title
                         highlighted: isActive || isSelected || (essentialsView.activeFocus && ListView.isCurrentItem)
+                        implicitHeight: root.pinnedTabRowHeight
                         hoverEnabled: true
-                        readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (essentialsView.activeFocus && ListView.isCurrentItem))
+                        readonly property bool showActions: !root.sidebarShowIconsOnly && (hovered || isActive || isSelected || (essentialsView.activeFocus && ListView.isCurrentItem))
 
                         background: Rectangle {
                             radius: 8
@@ -4186,7 +4414,7 @@ ApplicationWindow {
                         }
 
                         ToolTip.visible: hovered
-                        ToolTip.delay: 500
+                        ToolTip.delay: root.tooltipDelayMs
                         ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
@@ -4201,45 +4429,53 @@ ApplicationWindow {
                         contentItem: RowLayout {
                             spacing: 6
                             Item {
-                                width: 18
-                                height: 18
                                 Layout.alignment: Qt.AlignVCenter
+                                Layout.fillWidth: root.sidebarShowIconsOnly
+                                Layout.preferredWidth: root.tabIconSize
+                                Layout.preferredHeight: root.tabIconSize
 
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: 4
-                                    color: Qt.rgba(0, 0, 0, 0.08)
-                                    visible: !(faviconUrl && faviconUrl.toString().length > 0)
+                                Item {
+                                    anchors.centerIn: parent
+                                    width: root.tabIconSize
+                                    height: root.tabIconSize
 
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: title && title.length > 0 ? title[0].toUpperCase() : ""
-                                        font.pixelSize: 10
-                                        opacity: 0.6
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Math.max(4, Math.round(root.uiRadius * 0.4))
+                                        color: Qt.rgba(0, 0, 0, 0.08)
+                                        visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                            font.pixelSize: 10
+                                            opacity: 0.6
+                                        }
                                     }
-                                }
 
-                                Image {
-                                    anchors.fill: parent
-                                    source: faviconUrl
-                                    asynchronous: true
-                                    cache: true
-                                    fillMode: Image.PreserveAspectFit
-                                    visible: faviconUrl && faviconUrl.toString().length > 0
+                                    Image {
+                                        anchors.fill: parent
+                                        source: faviconUrl
+                                        asynchronous: true
+                                        cache: true
+                                        fillMode: Image.PreserveAspectFit
+                                        visible: faviconUrl && faviconUrl.toString().length > 0
+                                    }
                                 }
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 text: title
                                 elide: Text.ElideRight
                             }
                             Text {
                                 text: "⟳"
-                                Layout.preferredWidth: 18
+                                Layout.preferredWidth: (!root.sidebarShowIconsOnly && isLoading) ? root.tabIconSize : 0
+                                Layout.preferredHeight: root.tabIconSize
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: isLoading ? 0.85 : 0.0
 
                                 NumberAnimation on rotation {
@@ -4258,11 +4494,12 @@ ApplicationWindow {
                                 }
                             }
                             Text {
-                                text: isMuted ? "🔇" : "🔊"
-                                Layout.preferredWidth: 18
+                                text: isMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A"
+                                Layout.preferredWidth: (!root.sidebarShowIconsOnly && isAudioPlaying) ? root.tabIconSize : 0
+                                Layout.preferredHeight: root.tabIconSize
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: isAudioPlaying ? 0.85 : 0.0
 
                                 Behavior on opacity {
@@ -4273,8 +4510,18 @@ ApplicationWindow {
                                 }
                             }
                             ToolButton {
+                                Layout.preferredWidth: root.tabActionSize
+                                Layout.preferredHeight: root.tabActionSize
+                                padding: 0
+                                focusPolicy: Qt.NoFocus
+                                hoverEnabled: true
+
+                                background: Rectangle {
+                                    radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                    color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                }
                                 text: "\u2605"
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: showActions ? 1.0 : 0.0
                                 enabled: showActions
                                 onClicked: commands.invoke("toggle-essential", { tabId: tabId })
@@ -4287,8 +4534,18 @@ ApplicationWindow {
                                 }
                             }
                             ToolButton {
+                                Layout.preferredWidth: root.tabActionSize
+                                Layout.preferredHeight: root.tabActionSize
+                                padding: 0
+                                focusPolicy: Qt.NoFocus
+                                hoverEnabled: true
+
+                                background: Rectangle {
+                                    radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                    color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                }
                                 text: "\u00D7"
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: showActions ? 1.0 : 0.0
                                 enabled: showActions
                                 onClicked: commands.invoke("close-tab", { tabId: tabId })
@@ -4343,7 +4600,7 @@ ApplicationWindow {
                 Item {
                     Layout.fillWidth: true
                     implicitHeight: tabsLabel.implicitHeight
-                    visible: root.sidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs"
 
                     Label {
                         id: tabsLabel
@@ -4376,7 +4633,7 @@ ApplicationWindow {
 
                 Frame {
                     Layout.fillWidth: true
-                    visible: root.sidebarPanel === "tabs" && !root.sidebarIconOnly && browser.tabs && Number(browser.tabs.selectedCount || 0) > 1
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly && browser.tabs && Number(browser.tabs.selectedCount || 0) > 1
                     padding: 8
 
                     background: Rectangle {
@@ -4424,7 +4681,7 @@ ApplicationWindow {
                     delegate: ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 4
-                        visible: root.sidebarPanel === "tabs"
+                        visible: root.effectiveSidebarPanel === "tabs"
 
                         property bool searching: false
                         property bool renaming: false
@@ -4452,7 +4709,7 @@ ApplicationWindow {
                          Item {
                              id: groupHeaderHost
                              Layout.fillWidth: true
-                             implicitHeight: groupHeaderRow.implicitHeight
+                             implicitHeight: root.tabRowHeight
 
                              function buildGroupHeaderContextMenuItems() {
                                 const items = []
@@ -4497,16 +4754,20 @@ ApplicationWindow {
                                  acceptedDevices: PointerDevice.Mouse
                              }
 
+                             ToolTip.visible: groupHeaderHoverHandler.hovered && root.sidebarShowIconsOnly
+                             ToolTip.delay: root.tooltipDelayMs
+                             ToolTip.text: name
+
                              Rectangle {
                                  anchors.fill: parent
-                                 radius: 6
+                                 radius: 8
                                  color: Qt.rgba(0.2, 0.5, 1.0, 0.12)
                                  visible: groupHeaderDrop.containsDrag
                              }
 
                              Rectangle {
                                  anchors.fill: parent
-                                 radius: 6
+                                 radius: 8
                                  color: Qt.rgba(0, 0, 0, 0.04)
                                  visible: groupHeaderHoverHandler.hovered
                              }
@@ -4517,7 +4778,17 @@ ApplicationWindow {
                                 spacing: 6
 
                                 ToolButton {
-                                    text: collapsed ? "+" : "−"
+                                    Layout.preferredWidth: root.tabActionSize
+                                    Layout.preferredHeight: root.tabActionSize
+                                    padding: 0
+                                    focusPolicy: Qt.NoFocus
+                                    hoverEnabled: true
+
+                                    background: Rectangle {
+                                        radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                        color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                    }
+                                    text: collapsed ? "\u25B6" : "\u25BC"
                                     onClicked: browser.tabGroups.setCollapsedAt(index, !collapsed)
                                 }
 
@@ -4539,7 +4810,7 @@ ApplicationWindow {
                                 TextField {
                                     id: groupRenameField
                                     Layout.fillWidth: true
-                                    visible: renaming
+                                    visible: renaming && !root.sidebarShowIconsOnly
                                     text: name
                                     selectByMouse: true
                                     onAccepted: finishRename()
@@ -4549,7 +4820,7 @@ ApplicationWindow {
 
                                 Label {
                                     Layout.fillWidth: true
-                                    visible: !renaming
+                                    visible: !renaming && !root.sidebarShowIconsOnly
                                     text: name
                                     elide: Text.ElideRight
                                     font.bold: true
@@ -4566,6 +4837,17 @@ ApplicationWindow {
                                 }
 
                                 ToolButton {
+                                    Layout.preferredWidth: root.tabActionSize
+                                    Layout.preferredHeight: root.tabActionSize
+                                    padding: 0
+                                    focusPolicy: Qt.NoFocus
+                                    hoverEnabled: true
+                                    visible: !root.sidebarShowIconsOnly
+
+                                    background: Rectangle {
+                                        radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                        color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                    }
                                     text: searching ? "\u2715" : "\u2315"
                                     onClicked: {
                                         searching = !searching
@@ -4576,6 +4858,17 @@ ApplicationWindow {
                                 }
 
                                 ToolButton {
+                                    Layout.preferredWidth: root.tabActionSize
+                                    Layout.preferredHeight: root.tabActionSize
+                                    padding: 0
+                                    focusPolicy: Qt.NoFocus
+                                    hoverEnabled: true
+                                    visible: !root.sidebarShowIconsOnly
+
+                                    background: Rectangle {
+                                        radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                        color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                    }
                                     text: "\u00D7"
                                     onClicked: browser.deleteTabGroup(groupId)
                                 }
@@ -4614,9 +4907,12 @@ ApplicationWindow {
                                  anchors.fill: parent
                                  acceptedButtons: Qt.RightButton
                                  onClicked: (mouse) => {
-                                     const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                     popupManager.openAtPoint(groupHeaderContextMenuComponent, pos.x, pos.y, sidebarPane)
-                                     root.popupManagerContext = "sidebar-context-menu"
+                                     const mx = mouse.x
+                                     const my = mouse.y
+                                     root.openPopupWithContext("sidebar-context-menu", () => {
+                                         const pos = groupHeaderContextArea.mapToItem(popupManager, mx, my)
+                                         popupManager.openAtPoint(groupHeaderContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                     })
                                  }
                              }
                          }
@@ -4770,9 +5066,10 @@ ApplicationWindow {
                                 width: ListView.view.width
                                 text: title
                                 highlighted: isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem)
+                                implicitHeight: root.tabRowHeight
                                 hoverEnabled: true
                                 property bool dropAfter: false
-                                readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem))
+                                readonly property bool showActions: !root.sidebarShowIconsOnly && (hovered || isActive || isSelected || (ListView.view.activeFocus && ListView.isCurrentItem))
 
                                 Timer {
                                     id: tabPreviewDelayTimer
@@ -4802,7 +5099,22 @@ ApplicationWindow {
                                                : (isSelected ? Qt.rgba(0, 0, 0, 0.08) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"))
                                     border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
                                     border.width: isActive ? 1 : 0
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.top: parent.top
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: 6
+                                        width: 3
+                                        radius: 2
+                                        color: theme.accentColor
+                                        visible: isActive
+                                    }
                                 }
+
+                                ToolTip.visible: hovered && root.sidebarShowIconsOnly
+                                ToolTip.delay: root.tooltipDelayMs
+                                ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
 
                                 Drag.active: groupTabDrag.active
                                 Drag.hotSpot.x: width / 2
@@ -4850,8 +5162,9 @@ ApplicationWindow {
                                         ListView.view.forceActiveFocus()
                                         root.prepareContextMenuSelection(tabId)
                                         const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                        popupManager.openAtPoint(groupTabContextMenuComponent, pos.x, pos.y, sidebarPane)
-                                        root.popupManagerContext = "sidebar-context-menu"
+                                        root.openPopupWithContext("sidebar-context-menu", () => {
+                                            popupManager.openAtPoint(groupTabContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                        })
                                     }
                                 }
 
@@ -4940,36 +5253,43 @@ ApplicationWindow {
                                 contentItem: RowLayout {
                                     spacing: 6
                                     Item {
-                                        width: 18
-                                        height: 18
                                         Layout.alignment: Qt.AlignVCenter
+                                        Layout.fillWidth: root.sidebarShowIconsOnly
+                                        Layout.preferredWidth: root.tabIconSize
+                                        Layout.preferredHeight: root.tabIconSize
 
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: 4
-                                            color: Qt.rgba(0, 0, 0, 0.08)
-                                            visible: !(faviconUrl && faviconUrl.toString().length > 0)
+                                        Item {
+                                            anchors.centerIn: parent
+                                            width: root.tabIconSize
+                                            height: root.tabIconSize
 
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: title && title.length > 0 ? title[0].toUpperCase() : ""
-                                                font.pixelSize: 10
-                                                opacity: 0.6
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: Math.max(4, Math.round(root.uiRadius * 0.4))
+                                                color: Qt.rgba(0, 0, 0, 0.08)
+                                                visible: !(faviconUrl && faviconUrl.toString().length > 0)
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: title && title.length > 0 ? title[0].toUpperCase() : ""
+                                                    font.pixelSize: 10
+                                                    opacity: 0.6
+                                                }
                                             }
-                                        }
 
-                                        Image {
-                                            anchors.fill: parent
-                                            source: faviconUrl
-                                            asynchronous: true
-                                            cache: true
-                                            fillMode: Image.PreserveAspectFit
-                                            visible: faviconUrl && faviconUrl.toString().length > 0
+                                            Image {
+                                                anchors.fill: parent
+                                                source: faviconUrl
+                                                asynchronous: true
+                                                cache: true
+                                                fillMode: Image.PreserveAspectFit
+                                                visible: faviconUrl && faviconUrl.toString().length > 0
+                                            }
                                         }
                                     }
                                     Label {
                                         Layout.fillWidth: true
-                                        visible: !root.sidebarIconOnly
+                                        visible: !root.sidebarShowIconsOnly
                                         text: title
                                         elide: Text.ElideRight
                                     }
@@ -4978,7 +5298,7 @@ ApplicationWindow {
                                         Layout.preferredWidth: 18
                                         horizontalAlignment: Text.AlignHCenter
                                         Layout.alignment: Qt.AlignVCenter
-                                        visible: !root.sidebarIconOnly
+                                        visible: !root.sidebarShowIconsOnly
                                         opacity: isLoading ? 0.85 : 0.0
 
                                         NumberAnimation on rotation {
@@ -4997,11 +5317,12 @@ ApplicationWindow {
                                         }
                                     }
                                     Text {
-                                        text: isMuted ? "🔇" : "🔊"
-                                        Layout.preferredWidth: 18
+                                        text: isMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A"
+                                        Layout.preferredWidth: (!root.sidebarShowIconsOnly && isAudioPlaying) ? root.tabIconSize : 0
+                                        Layout.preferredHeight: root.tabIconSize
                                         horizontalAlignment: Text.AlignHCenter
                                         Layout.alignment: Qt.AlignVCenter
-                                        visible: !root.sidebarIconOnly
+                                        visible: !root.sidebarShowIconsOnly
                                         opacity: isAudioPlaying ? 0.85 : 0.0
 
                                         Behavior on opacity {
@@ -5013,14 +5334,25 @@ ApplicationWindow {
                                     }
                                     ToolButton {
                                         id: groupMoreButton
+                                        Layout.preferredWidth: root.tabActionSize
+                                        Layout.preferredHeight: root.tabActionSize
+                                        padding: 0
+                                        focusPolicy: Qt.NoFocus
+                                        hoverEnabled: true
+
+                                        background: Rectangle {
+                                            radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                            color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                        }
                                         text: "⋯"
-                                        visible: !root.sidebarIconOnly
+                                        visible: !root.sidebarShowIconsOnly
                                         opacity: showActions ? 1.0 : 0.0
                                         enabled: showActions
                                         onClicked: {
                                             root.prepareContextMenuSelection(tabId)
-                                            popupManager.openAtItem(groupTabContextMenuComponent, groupMoreButton, sidebarPane)
-                                            root.popupManagerContext = "sidebar-context-menu"
+                                            root.openPopupWithContext("sidebar-context-menu", () => {
+                                                popupManager.openAtItem(groupTabContextMenuComponent, groupMoreButton, sidebarPane)
+                                            })
                                         }
 
                                         Behavior on opacity {
@@ -5031,8 +5363,18 @@ ApplicationWindow {
                                         }
                                     }
                                     ToolButton {
-                                        text: isEssential ? "★" : "☆"
-                                        visible: !root.sidebarIconOnly
+                                        Layout.preferredWidth: root.tabActionSize
+                                        Layout.preferredHeight: root.tabActionSize
+                                        padding: 0
+                                        focusPolicy: Qt.NoFocus
+                                        hoverEnabled: true
+
+                                        background: Rectangle {
+                                            radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                            color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                        }
+                                        text: isEssential ? "\u2605" : "\u2606"
+                                        visible: !root.sidebarShowIconsOnly
                                         opacity: showActions ? 1.0 : 0.0
                                         enabled: showActions
                                         onClicked: commands.invoke("toggle-essential", { tabId: tabId })
@@ -5045,8 +5387,18 @@ ApplicationWindow {
                                         }
                                     }
                                     ToolButton {
-                                        text: "×"
-                                        visible: !root.sidebarIconOnly
+                                        Layout.preferredWidth: root.tabActionSize
+                                        Layout.preferredHeight: root.tabActionSize
+                                        padding: 0
+                                        focusPolicy: Qt.NoFocus
+                                        hoverEnabled: true
+
+                                        background: Rectangle {
+                                            radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                            color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                        }
+                                        text: "\u00D7"
+                                        visible: !root.sidebarShowIconsOnly
                                         opacity: showActions ? 1.0 : 0.0
                                         enabled: showActions
                                         onClicked: commands.invoke("close-tab", { tabId: tabId })
@@ -5068,9 +5420,10 @@ ApplicationWindow {
                     id: tabList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    visible: root.sidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs"
                     clip: true
                     model: regularTabs
+                    Accessible.name: "Tabs"
                     activeFocusOnTab: true
                     currentIndex: -1
                     property int selectionAnchorIndex: -1
@@ -5180,9 +5533,10 @@ ApplicationWindow {
                         width: ListView.view.width
                         text: title
                         highlighted: isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem)
+                        implicitHeight: root.tabRowHeight
                         property bool renaming: false
                         property bool dropAfter: false
-                        readonly property bool showActions: !root.sidebarIconOnly && (hovered || isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem))
+                        readonly property bool showActions: !root.sidebarShowIconsOnly && (hovered || isActive || isSelected || (tabList.activeFocus && ListView.isCurrentItem))
                         hoverEnabled: true
 
                         Timer {
@@ -5224,7 +5578,22 @@ ApplicationWindow {
                                        : (isSelected ? Qt.rgba(0, 0, 0, 0.08) : (parent.hovered ? Qt.rgba(0, 0, 0, 0.04) : "transparent"))
                             border.color: isActive ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35) : "transparent"
                             border.width: isActive ? 1 : 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 6
+                                width: 3
+                                radius: 2
+                                color: theme.accentColor
+                                visible: isActive
+                            }
                         }
+
+                        ToolTip.visible: hovered && root.sidebarShowIconsOnly
+                        ToolTip.delay: root.tooltipDelayMs
+                        ToolTip.text: url && url.toString().length > 0 ? (title + "\n" + url.toString()) : title
 
                         Drag.active: tabDrag.active
                         Drag.hotSpot.x: width / 2
@@ -5246,7 +5615,7 @@ ApplicationWindow {
                             acceptedButtons: Qt.LeftButton
                             onTapped: root.handleTabRowClick(tabList, regularTabs, index, tabId, point.modifiers, true)
                             onDoubleTapped: {
-                                if (root.sidebarIconOnly) {
+                                if (root.sidebarShowIconsOnly) {
                                     return
                                 }
                                 if ((point.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) !== 0) {
@@ -5292,8 +5661,9 @@ ApplicationWindow {
                                 tabList.forceActiveFocus()
                                 root.prepareContextMenuSelection(tabId)
                                 const pos = mapToItem(popupManager, mouse.x, mouse.y)
-                                popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y, sidebarPane)
-                                root.popupManagerContext = "sidebar-context-menu"
+                                root.openPopupWithContext("sidebar-context-menu", () => {
+                                    popupManager.openAtPoint(tabContextMenuComponent, pos.x, pos.y, sidebarPane)
+                                })
                             }
                         }
 
@@ -5412,7 +5782,7 @@ ApplicationWindow {
                             TextField {
                                 id: renameField
                                 Layout.fillWidth: true
-                                visible: renaming && !root.sidebarIconOnly
+                                visible: renaming && !root.sidebarShowIconsOnly
                                 text: title
                                 selectByMouse: true
                                 onAccepted: finishRename()
@@ -5421,17 +5791,18 @@ ApplicationWindow {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                visible: !renaming && !root.sidebarIconOnly
+                                visible: !renaming && !root.sidebarShowIconsOnly
                                 text: title
                                 elide: Text.ElideRight
                             }
                             Text {
                                 id: loadingIcon
-                                text: "⟳"
-                                Layout.preferredWidth: 18
+                                text: "\u27F3"
+                                Layout.preferredWidth: (!root.sidebarShowIconsOnly && isLoading) ? root.tabIconSize : 0
+                                Layout.preferredHeight: root.tabIconSize
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: isLoading ? 0.85 : 0.0
 
                                 NumberAnimation on rotation {
@@ -5451,11 +5822,12 @@ ApplicationWindow {
                             }
                             Text {
                                 id: audioIcon
-                                text: isMuted ? "🔇" : "🔊"
-                                Layout.preferredWidth: 18
+                                text: isMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A"
+                                Layout.preferredWidth: (!root.sidebarShowIconsOnly && isAudioPlaying) ? root.tabIconSize : 0
+                                Layout.preferredHeight: root.tabIconSize
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.alignment: Qt.AlignVCenter
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: isAudioPlaying ? 0.85 : 0.0
 
                                 Behavior on opacity {
@@ -5467,14 +5839,25 @@ ApplicationWindow {
                             }
                             ToolButton {
                                 id: moreButton
+                                Layout.preferredWidth: root.tabActionSize
+                                Layout.preferredHeight: root.tabActionSize
+                                padding: 0
+                                focusPolicy: Qt.NoFocus
+                                hoverEnabled: true
+
+                                background: Rectangle {
+                                    radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                    color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                }
                                 text: "⋯"
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: showActions ? 1.0 : 0.0
                                 enabled: showActions
                                 onClicked: {
                                     root.prepareContextMenuSelection(tabId)
-                                    popupManager.openAtItem(tabContextMenuComponent, moreButton, sidebarPane)
-                                    root.popupManagerContext = "sidebar-context-menu"
+                                    root.openPopupWithContext("sidebar-context-menu", () => {
+                                        popupManager.openAtItem(tabContextMenuComponent, moreButton, sidebarPane)
+                                    })
                                 }
 
                                 Behavior on opacity {
@@ -5485,8 +5868,18 @@ ApplicationWindow {
                                 }
                             }
                             ToolButton {
+                                Layout.preferredWidth: root.tabActionSize
+                                Layout.preferredHeight: root.tabActionSize
+                                padding: 0
+                                focusPolicy: Qt.NoFocus
+                                hoverEnabled: true
+
+                                background: Rectangle {
+                                    radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                    color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                }
                                 text: isEssential ? "\u2605" : "\u2606"
-                                visible: !root.sidebarIconOnly
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: showActions ? 1.0 : 0.0
                                 enabled: showActions
                                 onClicked: commands.invoke("toggle-essential", { tabId: tabId })
@@ -5499,8 +5892,18 @@ ApplicationWindow {
                                 }
                             }
                             ToolButton {
-                                text: "×"
-                                visible: !root.sidebarIconOnly
+                                Layout.preferredWidth: root.tabActionSize
+                                Layout.preferredHeight: root.tabActionSize
+                                padding: 0
+                                focusPolicy: Qt.NoFocus
+                                hoverEnabled: true
+
+                                background: Rectangle {
+                                    radius: Math.max(6, Math.round(root.uiRadius * 0.6))
+                                    color: parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                                }
+                                text: "\u00D7"
+                                visible: !root.sidebarShowIconsOnly
                                 opacity: showActions ? 1.0 : 0.0
                                 enabled: showActions
                                 onClicked: {
@@ -5520,13 +5923,13 @@ ApplicationWindow {
 
                 NotificationsStack {
                     Layout.fillWidth: true
-                    visible: root.sidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs"
                     notifications: root.notificationsModel
                 }
 
                 MediaControls {
                     Layout.fillWidth: true
-                    visible: root.sidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs"
                     view: root.mediaView
                 }
 
@@ -5535,6 +5938,7 @@ ApplicationWindow {
                     browser: root.browserModel
                     workspaces: root.browserModel.workspaces
                     settings: root.browserModel.settings
+                    themes: root.themesModel
                     popupHost: popupManager
                     popupContextHost: root
                 }
@@ -5666,11 +6070,19 @@ ApplicationWindow {
                 WebView2View {
                     id: tabWeb
                     required property int tabId
+                    required property int workspaceId
                     property int lastThumbnailCaptureMs: 0
 
-                    readonly property int paneIndex: splitView.enabled
-                                                          ? splitView.paneIndexForTabId(tabId)
-                                                          : (tabId === root.tabIdForActiveIndex() ? 0 : -1)
+                    readonly property bool workspaceActive: workspaceId === root.activeWorkspaceId
+                    readonly property var tabsModel: browser.workspaces && browser.workspaces.tabsForWorkspaceId
+                                                         ? browser.workspaces.tabsForWorkspaceId(workspaceId)
+                                                         : null
+
+                    readonly property int paneIndex: !workspaceActive
+                                                          ? -1
+                                                          : (splitView.enabled
+                                                                 ? splitView.paneIndexForTabId(tabId)
+                                                                 : (tabId === root.tabIdForActiveIndex() ? 0 : -1))
                     readonly property var paneRect: paneIndex >= 0 ? contentHost.paneRect(paneIndex) : ({ x: 0, y: 0, width: 0, height: 0 })
 
                     visible: paneIndex >= 0
@@ -5691,24 +6103,35 @@ ApplicationWindow {
                     }
 
                     onTitleChanged: {
-                        if (tabId > 0) {
-                            browser.setTabTitleById(tabId, title)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setTitleAt(idx, title)
+                            }
                         }
                     }
 
                     onCurrentUrlChanged: {
-                        if (tabId > 0) {
-                            browser.setTabUrlById(tabId, currentUrl)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setUrlAt(idx, currentUrl)
+                            }
                         }
-                        if (tabId === root.focusedTabId) {
+                        if (workspaceActive && tabId === root.focusedTabId) {
                             root.syncAddressFieldFromFocused()
                         }
-                        root.applyZoomForView(tabWeb)
+                        if (workspaceActive) {
+                            root.applyZoomForView(tabWeb)
+                        }
                     }
 
                     onIsLoadingChanged: {
-                        if (tabId > 0) {
-                            browser.setTabIsLoadingById(tabId, isLoading)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setLoadingAt(idx, isLoading)
+                            }
                         }
                         if (!isLoading) {
                             scheduleThumbnailCapture()
@@ -5740,20 +6163,31 @@ ApplicationWindow {
                     }
 
                     onDocumentPlayingAudioChanged: {
-                        if (tabId > 0) {
-                            browser.setTabAudioStateById(tabId, documentPlayingAudio, muted)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setAudioPlayingAt(idx, documentPlayingAudio)
+                                tabsModel.setMutedAt(idx, muted)
+                            }
                         }
                     }
 
                     onMutedChanged: {
-                        if (tabId > 0) {
-                            browser.setTabAudioStateById(tabId, documentPlayingAudio, muted)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setAudioPlayingAt(idx, documentPlayingAudio)
+                                tabsModel.setMutedAt(idx, muted)
+                            }
                         }
                     }
 
                     onFaviconUrlChanged: {
-                        if (tabId > 0) {
-                            browser.setTabFaviconUrlById(tabId, faviconUrl)
+                        if (tabId > 0 && tabsModel) {
+                            const idx = tabsModel.indexOfTabId(tabId)
+                            if (idx >= 0) {
+                                tabsModel.setFaviconUrlAt(idx, faviconUrl)
+                            }
                         }
                     }
 
@@ -5818,23 +6252,30 @@ ApplicationWindow {
                         }
                     }
 
-                    onContainsFullScreenElementChanged: root.handleContentFullscreen(tabId, containsFullScreenElement)
+                    onContainsFullScreenElementChanged: {
+                        if (workspaceActive) {
+                            root.handleContentFullscreen(tabId, containsFullScreenElement)
+                        }
+                    }
 
                     onContextMenuRequested: (info) => root.openWebContextMenu(tabId, info)
 
                     onPermissionRequested: (requestId, origin, kind, userInitiated) => {
+                        if (!workspaceActive) {
+                            return
+                        }
                         root.showPermissionDoorhanger(tabId, requestId, origin, kind, userInitiated)
                     }
 
                     onWebMessageReceived: (json) => root.handleWebMessage(tabId, json, tabWeb)
                     onDownloadStarted: (downloadOperationId, uri, resultFilePath, totalBytes) => {
-                        root.handleDownloadStarted(tabId, downloadOperationId, uri, resultFilePath, totalBytes)
+                        root.handleDownloadStarted(workspaceId, tabId, downloadOperationId, uri, resultFilePath, totalBytes)
                     }
                     onDownloadProgress: (downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason) => {
-                        root.handleDownloadProgress(tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason)
+                        root.handleDownloadProgress(workspaceId, tabId, downloadOperationId, bytesReceived, totalBytes, paused, canResume, interruptReason)
                     }
                     onDownloadFinished: (downloadOperationId, uri, resultFilePath, success, interruptReason) => {
-                        root.handleDownloadFinished(tabId, downloadOperationId, uri, resultFilePath, success, interruptReason)
+                        root.handleDownloadFinished(workspaceId, tabId, downloadOperationId, uri, resultFilePath, success, interruptReason)
                     }
 
                         Rectangle {
@@ -6575,6 +7016,29 @@ ApplicationWindow {
                 }
                 return
             }
+            if (id === "open-command-palette") {
+                const field = root.activeAddressField()
+                if (!field) {
+                    return
+                }
+                field.forceActiveFocus()
+                Qt.callLater(() => {
+                    if (!field.activeFocus) {
+                        return
+                    }
+                    field.text = ">"
+                    field.cursorPosition = field.text.length
+                    root.updateOmnibox()
+
+                    Qt.callLater(() => {
+                        const view = root.currentOmniboxView()
+                        if (view) {
+                            view.currentIndex = view.firstSelectableIndex()
+                        }
+                    })
+                })
+                return
+            }
             if (id === "nav-back") {
                 const view = root.focusedView
                 const tabId = root.focusedTabId
@@ -6822,6 +7286,7 @@ ApplicationWindow {
             settings: root.browserModel.settings
             themes: root.themesModel
             bookmarks: root.bookmarksModel
+            sidebarButtons: sidebarButtons
             onCloseRequested: overlayHost.hide()
         }
     }
@@ -6937,7 +7402,7 @@ ApplicationWindow {
             bookmarks: root.bookmarksModel
             popupManager: popupManager
             embedded: true
-            onCloseRequested: root.sidebarPanel = "tabs"
+            onCloseRequested: browser.settings.sidebarPanel = "tabs"
         }
     }
 
@@ -6948,7 +7413,7 @@ ApplicationWindow {
             history: root.historyModel
             popupManager: popupManager
             embedded: true
-            onCloseRequested: root.sidebarPanel = "tabs"
+            onCloseRequested: browser.settings.sidebarPanel = "tabs"
         }
     }
 
@@ -6959,7 +7424,7 @@ ApplicationWindow {
             downloads: root.downloadsModel
             downloadController: root
             embedded: true
-            onCloseRequested: root.sidebarPanel = "tabs"
+            onCloseRequested: browser.settings.sidebarPanel = "tabs"
         }
     }
 
@@ -6969,7 +7434,7 @@ ApplicationWindow {
         ExtensionsDialog {
             extensions: extensions
             embedded: true
-            onCloseRequested: root.sidebarPanel = "tabs"
+            onCloseRequested: browser.settings.sidebarPanel = "tabs"
         }
     }
 

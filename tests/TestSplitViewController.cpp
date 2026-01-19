@@ -218,6 +218,57 @@ private slots:
     split.focusNextPane();
     QCOMPARE(split.focusedPane(), 0);
   }
+
+  void workspaceSwitch_restoresIndependentSplitState()
+  {
+    BrowserController browser;
+    SplitViewController split;
+    split.setBrowser(&browser);
+
+    TabModel* ws0Tabs = browser.tabs();
+    QVERIFY(ws0Tabs);
+    ws0Tabs->addTabWithId(100, QUrl("https://a.example"), "A", false);
+    ws0Tabs->addTabWithId(101, QUrl("https://b.example"), "B", false);
+    ws0Tabs->setActiveIndex(0);
+
+    split.setPaneCount(2);
+    split.setTabIdForPane(0, 100);
+    split.setTabIdForPane(1, 101);
+    split.setEnabled(true);
+    split.setFocusedPane(1);
+
+    const int ws1 = browser.workspaces()->addWorkspace(QStringLiteral("Two"));
+    QVERIFY(ws1 >= 0);
+    TabModel* ws1Tabs = browser.workspaces()->tabsForIndex(ws1);
+    QVERIFY(ws1Tabs);
+    ws1Tabs->addTabWithId(200, QUrl("https://c.example"), "C", false);
+    ws1Tabs->setActiveIndex(0);
+
+    browser.workspaces()->setActiveIndex(ws1);
+    QVERIFY(!split.enabled());
+    QCOMPARE(ws1Tabs->count(), 1);
+
+    split.setEnabled(true);
+    QVERIFY(split.enabled());
+    QVERIFY(ws1Tabs->count() >= 2);
+    const int ws1Primary = split.tabIdForPane(0);
+    const int ws1Secondary = split.tabIdForPane(1);
+    QVERIFY(ws1Primary > 0);
+    QVERIFY(ws1Secondary > 0);
+
+    browser.workspaces()->setActiveIndex(0);
+    QVERIFY(split.enabled());
+    QCOMPARE(split.paneCount(), 2);
+    QCOMPARE(split.tabIdForPane(0), 100);
+    QCOMPARE(split.tabIdForPane(1), 101);
+    QCOMPARE(split.focusedPane(), 1);
+
+    browser.workspaces()->setActiveIndex(ws1);
+    QVERIFY(split.enabled());
+    QCOMPARE(split.paneCount(), 2);
+    QCOMPARE(split.tabIdForPane(0), ws1Primary);
+    QCOMPARE(split.tabIdForPane(1), ws1Secondary);
+  }
 };
 
 QTEST_GUILESS_MAIN(TestSplitViewController)

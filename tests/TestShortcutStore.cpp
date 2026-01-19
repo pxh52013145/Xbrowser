@@ -82,6 +82,22 @@ private slots:
     }
     QVERIFY(foundNewTab);
   }
+
+  void defaults_includeCommandPalette()
+  {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    qputenv("XBROWSER_DATA_DIR", dir.path().toUtf8());
+
+    ShortcutStore store;
+    const int row = findRowById(store, QStringLiteral("open-command-palette"));
+    QVERIFY(row >= 0);
+    QCOMPARE(store.data(store.index(row, 0), ShortcutStore::SequenceRole).toString(), QStringLiteral("Ctrl+K"));
+
+    const int tabSwitcherRow = findRowById(store, QStringLiteral("open-tab-switcher"));
+    QVERIFY(tabSwitcherRow >= 0);
+    QCOMPARE(store.data(store.index(tabSwitcherRow, 0), ShortcutStore::SequenceRole).toString(), QStringLiteral("Ctrl+Shift+K"));
+  }
 };
 
 QTEST_GUILESS_MAIN(TestShortcutStore)

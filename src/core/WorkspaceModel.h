@@ -27,6 +27,8 @@ public:
     IsActiveRole,
     SidebarWidthRole,
     SidebarExpandedRole,
+    SidebarPanelRole,
+    ThemeOverrideRole,
   };
   Q_ENUM(Role)
 
@@ -54,6 +56,10 @@ public:
   Q_INVOKABLE QColor accentColorAt(int index) const;
   Q_INVOKABLE void setAccentColorAt(int index, const QColor& color);
 
+  Q_INVOKABLE QString themeOverrideAt(int index) const;
+  Q_INVOKABLE void setThemeOverrideAt(int index, const QString& themeId);
+  QString activeThemeOverride() const;
+
   Q_INVOKABLE bool hasCustomBackgroundAt(int index) const;
   Q_INVOKABLE bool hasCustomBackgroundMidAt(int index) const;
   Q_INVOKABLE QColor backgroundFromAt(int index) const;
@@ -75,10 +81,14 @@ public:
   Q_INVOKABLE bool sidebarExpandedAt(int index) const;
   Q_INVOKABLE void setSidebarExpandedAt(int index, bool expanded);
 
+  Q_INVOKABLE QString sidebarPanelAt(int index) const;
+  Q_INVOKABLE void setSidebarPanelAt(int index, const QString& panelId);
+
   int activeWorkspaceId() const;
   QColor activeAccentColor() const;
   TabModel* tabsForIndex(int index) const;
   TabGroupModel* groupsForIndex(int index) const;
+  Q_INVOKABLE TabModel* tabsForWorkspaceId(int workspaceId) const;
 
 signals:
   void activeIndexChanged();
@@ -89,6 +99,7 @@ private:
     int id = 0;
     QString name;
     QColor accentColor;
+    QString themeOverrideId;
     QColor backgroundFrom;
     QColor backgroundMid;
     bool backgroundHasMid = false;
@@ -99,6 +110,7 @@ private:
     QString iconValue;
     int sidebarWidth = 260;
     bool sidebarExpanded = true;
+    QString sidebarPanel = QStringLiteral("tabs");
     TabModel* tabs = nullptr;
     TabGroupModel* groups = nullptr;
   };
