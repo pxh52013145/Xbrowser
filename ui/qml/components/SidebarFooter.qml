@@ -4,7 +4,9 @@ import QtQuick.Layouts
 
 Item {
     id: root
-    implicitHeight: row.implicitHeight
+    implicitHeight: compactMode ? compactRow.implicitHeight : row.implicitHeight
+
+    ThemePalette { id: zenPalette }
 
     required property var browser
     required property var workspaces
@@ -12,6 +14,7 @@ Item {
     required property var themes
     required property var popupHost
     required property var popupContextHost
+    property bool compactMode: false
 
     property int renameWorkspaceIndex: -1
     property string renameDraft: ""
@@ -21,30 +24,22 @@ Item {
     RowLayout {
         id: row
         anchors.fill: parent
-        spacing: theme.spacing
-
+        visible: !root.compactMode
+        spacing: zenPalette.spacing
+        
         function buttonColor(active, hovered, enabled) {
-            if (!enabled) {
-                return Qt.rgba(0, 0, 0, 0.02)
-            }
-            if (active) {
-                return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, hovered ? 0.22 : 0.18)
-            }
-            return hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+            if (!enabled) return "transparent"
+            if (active) return zenPalette.accentLight
+            return hovered ? zenPalette.surfaceAlt : "transparent"
         }
 
         function buttonBorder(active, hovered, enabled) {
-            if (!enabled) {
-                return Qt.rgba(0, 0, 0, 0.06)
-            }
-            if (active) {
-                return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35)
-            }
-            return hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08)
+            if (active) return zenPalette.accent
+            return "transparent"
         }
 
         function buttonRadius() {
-            return Math.max(6, Math.round(theme.cornerRadius * 0.8))
+            return zenPalette.cornerRadiusSmall
         }
 
         ToolButton {
@@ -92,12 +87,10 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: theme.cornerRadius
-                    color: isActive
-                               ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, hover.hovered ? 0.26 : 0.22)
-                               : (hover.hovered ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(0, 0, 0, 0.04))
-                    border.color: isActive ? accentColor : (hover.hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08))
-                    border.width: 1
+                    radius: zenPalette.cornerRadius
+                    color: isActive ? zenPalette.accentLight : (hover.hovered ? zenPalette.surfaceAlt : "transparent")
+                    border.color: isActive ? zenPalette.accent : "transparent"
+                    border.width: isActive ? 1 : 0
                 }
 
                 Item {
@@ -134,7 +127,7 @@ Item {
                     anchors.rightMargin: 8
                     text: name
                     elide: Text.ElideRight
-                    color: "#1f1f1f"
+                    color: zenPalette.textPrimary
                     font.pixelSize: 12
                 }
 
@@ -214,7 +207,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: 10
-                    color: Qt.rgba(0.2, 0.5, 1.0, 0.14)
+                    color: zenPalette.accentLight
                     visible: wsDrop.containsDrag
                 }
 
@@ -312,13 +305,68 @@ Item {
         }
     }
 
+    RowLayout {
+        id: compactRow
+        anchors.fill: parent
+        visible: root.compactMode
+        spacing: 6
+
+        ToolButton {
+            text: settings.sidebarExpanded ? "<" : ">"
+            onClicked: commands.invoke("toggle-sidebar")
+            background: Rectangle {
+                radius: row.buttonRadius()
+                color: row.buttonColor(false, parent.hovered, parent.enabled)
+                border.color: row.buttonBorder(false, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: settings.sidebarExpanded ? "Collapse Sidebar" : "Expand Sidebar"
+        }
+
+        ToolButton {
+            id: compactWorkspaceMenuButton
+            text: "\u22EE"
+            onClicked: root.popupContextHost.togglePopupWithContext("sidebar-workspace-menu", () => {
+                root.popupHost.openAtItem(workspaceMenuComponent, compactWorkspaceMenuButton)
+            })
+            background: Rectangle {
+                radius: row.buttonRadius()
+                readonly property bool active: root.popupHost.opened
+                                               && root.popupContextHost
+                                               && (root.popupContextHost.popupManagerContext === "sidebar-workspace-menu")
+                color: row.buttonColor(active, parent.hovered, parent.enabled)
+                border.color: parent.activeFocus ? theme.accentColor : row.buttonBorder(active, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: "Workspace Menu"
+        }
+
+        ToolButton {
+            text: "+"
+            onClicked: commands.invoke("new-tab", { url: "about:blank" })
+            background: Rectangle {
+                radius: row.buttonRadius()
+                color: row.buttonColor(false, parent.hovered, parent.enabled)
+                border.color: row.buttonBorder(false, parent.hovered, parent.enabled)
+                border.width: parent.activeFocus ? 2 : 1
+            }
+            ToolTip.visible: hovered
+            ToolTip.delay: 300
+            ToolTip.text: "New Tab"
+        }
+    }
+
     Component {
         id: workspaceMenuComponent
 
         Rectangle {
-            color: Qt.rgba(1, 1, 1, 0.98)
+            color: zenPalette.surface
             radius: theme.cornerRadius
-            border.color: Qt.rgba(0, 0, 0, 0.12)
+            border.color: zenPalette.border
             border.width: 1
 
             implicitWidth: 220
@@ -429,9 +477,9 @@ Item {
         id: renameDialogComponent
 
         Rectangle {
-            color: Qt.rgba(1, 1, 1, 0.98)
+            color: zenPalette.surface
             radius: theme.cornerRadius
-            border.color: Qt.rgba(0, 0, 0, 0.12)
+            border.color: zenPalette.border
             border.width: 1
 
             implicitWidth: 320

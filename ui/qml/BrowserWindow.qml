@@ -26,6 +26,11 @@ ApplicationWindow {
     property int viewSourceTabId: 0
     property var viewSourceTargetView: null
 
+    property bool zenShellMode: false
+    property bool zenMinimalTopBar: false
+    property bool zenHideSidebarToolsBar: false
+    property bool zenDomainOnlyOmnibox: false
+
     property var activeDownloadIdByKey: ({})
     property var activeDownloadOpById: ({})
     property string lastFailedDownloadUri: ""
@@ -79,8 +84,14 @@ ApplicationWindow {
         onTriggered: root.updateOmnibox()
     }
 
-    readonly property int windowControlButtonWidth: 46
-    readonly property int windowControlButtonHeight: 32
+    readonly property int windowControlButtonWidth: 38
+    readonly property int windowControlButtonHeight: 30
+    readonly property int windowControlCornerRadius: 7
+    readonly property int designGrid: 8
+    readonly property int topBarButtonSize: 32
+    readonly property int topBarButtonRadius: 16
+    readonly property int topBarCompactButtonSize: 20
+    readonly property int topBarCompactButtonRadius: 10
 
     readonly property bool showTopBar: layoutController.showTopBar
     readonly property bool showSidebar: layoutController.showSidebar
@@ -92,13 +103,39 @@ ApplicationWindow {
                                                  && browser.settings.sidebarHoverExpandEnabled
                                                  && sidebarHoverExpandActive
     readonly property bool sidebarShowIconsOnly: root.sidebarIconOnly && !root.sidebarHoverExpanded
-    readonly property int sidebarEffectiveWidth: root.sidebarHoverExpanded ? 260 : (browser.settings ? browser.settings.sidebarWidth : 260)
+    readonly property int sidebarCollapsedWidth: 76
+    readonly property int sidebarExpandedWidth: {
+        const configured = browser.settings ? Number(browser.settings.sidebarWidth || 260) : 260
+        return Math.max(220, Math.round(configured))
+    }
+    readonly property int sidebarEffectiveWidth: {
+        if (!root.sidebarIconOnly) {
+            return browser.settings ? browser.settings.sidebarWidth : 260
+        }
+        return root.sidebarHoverExpanded ? root.sidebarExpandedWidth : root.sidebarCollapsedWidth
+    }
     readonly property string effectiveSidebarPanel: (browser.settings && browser.settings.sidebarToolsDocked)
                                                         ? (browser.settings.sidebarPanel || "tabs")
                                                         : "tabs"
 
+    ThemePalette {
+        id: palette
+    }
+
     readonly property int uiRadius: theme.cornerRadius
     readonly property int uiSpacing: theme.spacing
+    readonly property int uiMotionFastMs: browser.settings && browser.settings.reduceMotion ? 0 : palette.motionFastMs
+    readonly property int uiMotionNormalMs: browser.settings && browser.settings.reduceMotion ? 0 : palette.motionNormalMs
+    readonly property int uiMotionSlowMs: browser.settings && browser.settings.reduceMotion ? 0 : palette.motionSlowMs
+    readonly property color chromeTopBarFill: palette.chromeTopBar
+    readonly property color chromeTopBarBorder: palette.chromeTopBarBorder
+    readonly property color chromeToolbarRowFill: palette.chromeSecondaryRow
+    readonly property color chromeOmniboxGlow: palette.chromeOmniboxGlow
+    readonly property color chromeOmniboxFill: palette.chromeOmniboxFill
+    readonly property color chromeOmniboxBorder: palette.chromeOmniboxBorder
+    readonly property color chromeSidebarFrom: palette.sidebarGradientFrom
+    readonly property color chromeSidebarTo: palette.sidebarGradientTo
+    readonly property color chromeSidebarBorder: palette.sidebarBorder
     readonly property int tooltipDelayMs: 300
     readonly property int tabRowHeight: 36
     readonly property int pinnedTabRowHeight: 40
@@ -2740,13 +2777,20 @@ ApplicationWindow {
             reloadButton,
             sitePanelButton,
             addressField,
+            zoomIndicatorButton,
             bookmarkButton,
+            shareUrlButton,
             emojiButton,
             newTabButton,
             extensionsToolbar,
             extensionsButton,
             downloadsButton,
-            mainMenuButton
+            mainMenuButton,
+            toolbarRow2,
+            topBarBookmarksToggle,
+            bookmarksRowScroller,
+            topBarExtensionsDock,
+            topBarExtensionsPanelButton
         ])
         windowChrome.setMinimizeButtonItem(windowMinimizeButton)
         windowChrome.setMaximizeButtonItem(windowMaximizeButton)
@@ -2800,16 +2844,30 @@ ApplicationWindow {
 
     header: ToolBar {
         id: topBar
-        readonly property int expandedHeight: 56
+        readonly property int primaryRowHeight: 56
+        readonly property int secondaryRowHeight: 32
+        readonly property bool secondaryRowVisible: showTopBar && !root.singleToolbarActive() && browser.settings && browser.settings.addressBarVisible
+        readonly property int expandedHeight: primaryRowHeight + (secondaryRowVisible ? secondaryRowHeight : 0)
+        readonly property int rowGap: root.designGrid
+        readonly property int sidePadding: 10
+        readonly property int omniboxOuterRadius: 23
+        readonly property int omniboxInnerRadius: 20
+        readonly property int omniboxPreferredWidth: Math.max(420, Math.min(560, Math.round(root.width * 0.46)))
         height: showTopBar ? expandedHeight : (root.fullscreenActive ? 0 : root.windowControlButtonHeight)
-        leftPadding: 6
-        rightPadding: 0
+        leftPadding: sidePadding
+        rightPadding: sidePadding
         topPadding: 0
         bottomPadding: 0
 
+        background: Rectangle {
+            color: root.chromeTopBarFill
+            border.color: root.chromeTopBarBorder
+            border.width: 1
+        }
+
         Behavior on height {
             NumberAnimation {
-                duration: browser.settings.reduceMotion ? 0 : theme.motionNormalMs
+                duration: root.uiMotionNormalMs
                 easing.type: Easing.InOutCubic
             }
         }
@@ -2818,48 +2876,77 @@ ApplicationWindow {
             onHoveredChanged: layoutController.topBarHovered = hovered
         }
 
-        RowLayout {
+        ColumnLayout {
             anchors.fill: parent
-            spacing: 6
+            spacing: 0
 
-            ToolButton {
+            RowLayout {
+                id: topBarPrimaryRow
+                Layout.fillWidth: true
+                Layout.preferredHeight: showTopBar ? topBar.primaryRowHeight : root.windowControlButtonHeight
+                Layout.maximumHeight: showTopBar ? topBar.primaryRowHeight : root.windowControlButtonHeight
+                spacing: topBar.rowGap
+
+            ChromeToolButton {
                 id: sidebarButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 Accessible.name: "Toggle sidebar"
-                text: browser.settings.sidebarExpanded ? "<" : ">"
+                text: browser.settings.sidebarExpanded ? "\u2329" : "\u232A"
                 onClicked: commands.invoke("toggle-sidebar")
+                ToolTip.visible: hovered
+                ToolTip.text: browser.settings.sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: backButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 Accessible.name: "Back"
-                text: "←"
+                text: "\u2190"
                 enabled: root.focusedView ? root.focusedView.canGoBack : false
                 onClicked: commands.invoke("nav-back")
+                ToolTip.visible: hovered
+                ToolTip.text: "Back"
             }
-            ToolButton {
+
+            ChromeToolButton {
                 id: forwardButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 Accessible.name: "Forward"
-                text: "→"
+                text: "\u2192"
                 enabled: root.focusedView ? root.focusedView.canGoForward : false
                 onClicked: commands.invoke("nav-forward")
+                ToolTip.visible: hovered
+                ToolTip.text: "Forward"
             }
-            ToolButton {
+
+            ChromeToolButton {
                 id: reloadButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 Accessible.name: (root.focusedView && root.focusedView.isLoading) ? "Stop loading" : "Reload"
                 text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
                 onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
+                ToolTip.visible: hovered
+                ToolTip.text: Accessible.name
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: sitePanelButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 Accessible.name: "Site information"
-                text: "ⓘ"
+                text: "\u2139"
                 onClicked: root.toggleTopBarPopup("site-panel", sitePanelComponent, sitePanelButton)
+                ToolTip.visible: hovered
+                ToolTip.text: "Site information"
             }
 
             TextField {
@@ -2868,16 +2955,45 @@ ApplicationWindow {
                 Accessible.name: "Address bar"
                 activeFocusOnTab: true
                 Layout.fillWidth: true
-                Layout.minimumWidth: 240
-                Layout.preferredWidth: 640
-                Layout.maximumWidth: 800
+                Layout.minimumWidth: 320
+                Layout.preferredWidth: topBar.omniboxPreferredWidth
+                Layout.maximumWidth: 560
+                implicitHeight: 40
                 placeholderText: "Search or enter address"
+                placeholderTextColor: palette.textSecondary
+                color: palette.textPrimary
+                selectionColor: Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.38)
+                selectedTextColor: palette.textPrimary
+                font.pixelSize: 13
+                font.family: palette.fontDefault.family
+                leftPadding: 14
+                rightPadding: 14
                 selectByMouse: true
-                background: Rectangle {
-                    radius: theme.cornerRadius
-                    color: Qt.rgba(1, 1, 1, 0.96)
-                    border.color: addressField.activeFocus ? theme.accentColor : Qt.rgba(0, 0, 0, 0.18)
-                    border.width: addressField.activeFocus ? 2 : 1
+
+                background: Item {
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -3
+                        radius: topBar.omniboxOuterRadius
+                        color: root.chromeOmniboxGlow
+                        opacity: addressField.activeFocus ? 1.0 : 0.72
+
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: root.uiMotionFastMs
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: topBar.omniboxInnerRadius
+                        color: root.chromeOmniboxFill
+                        border.color: addressField.activeFocus ? theme.accentColor : root.chromeOmniboxBorder
+                        border.width: addressField.activeFocus ? 2 : 1
+                        antialiasing: true
+                    }
                 }
                 onTextChanged: scheduleOmniboxUpdate()
                 onActiveFocusChanged: {
@@ -2960,23 +3076,28 @@ ApplicationWindow {
                 }
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: zoomIndicatorButton
                 visible: showTopBar && root.focusedView && Math.abs((root.focusedView.zoomFactor || 1.0) - 1.0) > 0.001
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
                 text: {
                     const view = root.focusedView
                     const factor = view ? (view.zoomFactor || 1.0) : 1.0
                     return Math.round(factor * 100) + "%"
                 }
+                font.pixelSize: 11
                 onClicked: commands.invoke("zoom-reset")
                 ToolTip.visible: hovered
-                ToolTip.delay: 500
                 ToolTip.text: "Reset zoom"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: bookmarkButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                activeState: root.focusedView && bookmarks && bookmarks.isBookmarked(root.focusedView.currentUrl)
                 text: {
                     const view = root.focusedView
                     if (!view || !bookmarks) {
@@ -2994,12 +3115,16 @@ ApplicationWindow {
                     bookmarks.toggleBookmark(view.currentUrl, view.title)
                     toast.showToast(wasBookmarked ? "Bookmark removed" : "Bookmarked")
                 }
+                ToolTip.visible: hovered
+                ToolTip.text: "Toggle bookmark"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: shareUrlButton
                 visible: showTopBar
-                text: (shareController && shareController.canShare) ? "Share" : "Copy"
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                text: (shareController && shareController.canShare) ? "\u21AA" : "\u2398"
                 enabled: root.focusedView
                          && root.focusedView.currentUrl
                          && root.focusedView.currentUrl.toString
@@ -3007,34 +3132,42 @@ ApplicationWindow {
                          && root.focusedView.currentUrl.toString() !== "about:blank"
                 onClicked: commands.invoke((shareController && shareController.canShare) ? "share-url" : "copy-url", { tabId: root.focusedTabId })
                 ToolTip.visible: hovered
-                ToolTip.delay: 500
                 ToolTip.text: (shareController && shareController.canShare) ? "Share URL" : "Copy URL"
             }
 
             Item {
                 id: windowDragRegion
                 Layout.fillWidth: true
-                Layout.minimumWidth: 80
-                Layout.preferredWidth: 200
+                Layout.minimumWidth: 120
+                Layout.preferredWidth: showTopBar ? 220 : 1
                 Layout.alignment: Qt.AlignVCenter
-                height: topBar.height
+                height: showTopBar ? topBar.primaryRowHeight : root.windowControlButtonHeight
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: emojiButton
                 visible: showTopBar
-                text: "😊"
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                text: "\u263A"
                 onClicked: root.toggleTopBarPopup("emoji-picker", emojiPickerComponent, emojiButton)
+                ToolTip.visible: hovered
+                ToolTip.text: "Emoji"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: newTabButton
                 visible: showTopBar
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                emphasized: true
                 text: "+"
                 onClicked: {
                     commands.invoke("new-tab", { url: "about:blank" })
                     commands.invoke("focus-address")
                 }
+                ToolTip.visible: hovered
+                ToolTip.text: "New tab"
             }
 
             ExtensionsFilterModel {
@@ -3045,13 +3178,13 @@ ApplicationWindow {
 
             RowLayout {
                 id: extensionsToolbar
-                visible: showTopBar
-                spacing: 2
-                readonly property int maxWidth: Math.max(extensionsOverflowButton.width, Math.min(320, Math.round(topBar.width * 0.25)))
+                visible: showTopBar && !topBar.secondaryRowVisible
+                spacing: 4
+                readonly property int maxWidth: Math.max(extensionsOverflowButton.width, Math.min(320, Math.round(topBar.width * 0.24)))
                 Layout.maximumWidth: maxWidth
                 clip: true
 
-                readonly property int buttonSize: 34
+                readonly property int buttonSize: root.topBarButtonSize
                 readonly property int pinnedCount: pinnedExtensionsRepeater.count
                 readonly property int availableWidth: Math.max(0, maxWidth)
                 readonly property int visiblePinnedCount: extensionsStore.visiblePinnedCountForWidth(
@@ -3098,7 +3231,7 @@ ApplicationWindow {
                     id: pinnedExtensionsRepeater
                     model: pinnedExtensionsModel
 
-                    delegate: ToolButton {
+                    delegate: ChromeToolButton {
                         id: pinnedExtensionButton
                         required property string extensionId
                         required property string name
@@ -3109,16 +3242,13 @@ ApplicationWindow {
                         required property string optionsUrl
 
                         visible: index < extensionsToolbar.visiblePinnedCount
-                        width: extensionsToolbar.buttonSize
-                        height: extensionsToolbar.buttonSize
+                        baseSize: extensionsToolbar.buttonSize
+                        cornerRadius: root.topBarButtonRadius
                         display: (iconUrl && iconUrl.toString().length > 0) ? AbstractButton.IconOnly : AbstractButton.TextOnly
                         icon.source: iconUrl
-                        icon.width: 18
-                        icon.height: 18
                         text: name && name.length > 0 ? name[0].toUpperCase() : ""
                         opacity: enabled ? 1.0 : 0.45
                         ToolTip.visible: hovered
-                        ToolTip.delay: 500
                         ToolTip.text: (name && name.length > 0 ? name : extensionId) + (enabled ? "" : " (disabled)")
 
                         onClicked: {
@@ -3160,15 +3290,14 @@ ApplicationWindow {
                     }
                 }
 
-                ToolButton {
+                ChromeToolButton {
                     id: extensionsOverflowButton
                     visible: extensionsToolbar.overflowNeeded
-                    width: extensionsToolbar.buttonSize
-                    height: extensionsToolbar.buttonSize
+                    baseSize: extensionsToolbar.buttonSize
+                    cornerRadius: root.topBarButtonRadius
                     text: "\u22EF"
                     onClicked: root.toggleTopBarPopup("extensions-overflow", extensionsOverflowMenuComponent, extensionsOverflowButton)
                     ToolTip.visible: hovered
-                    ToolTip.delay: 500
                     ToolTip.text: "More extensions"
                 }
 
@@ -3188,92 +3317,247 @@ ApplicationWindow {
                 }
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: extensionsButton
-                visible: showTopBar
-                text: "Ext"
+                visible: showTopBar && !topBar.secondaryRowVisible
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                text: "E"
                 enabled: extensions && extensions.ready === true
                 onClicked: root.openExtensionsPanel(extensionsButton)
+                ToolTip.visible: hovered
+                ToolTip.text: "Extensions"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: downloadsButton
                 visible: showTopBar
-                text: downloads.activeCount > 0 ? ("↓" + downloads.activeCount) : "↓"
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                activeState: downloads.activeCount > 0
+                text: downloads.activeCount > 0 ? ("\u2B07 " + downloads.activeCount) : "\u2B07"
                 onClicked: root.toggleTopBarPopup("downloads-panel", downloadsPanelComponent, downloadsButton)
+                ToolTip.visible: hovered
+                ToolTip.text: "Downloads"
             }
 
-            ToolButton {
+            ChromeToolButton {
                 id: mainMenuButton
-                text: "⋮"
+                baseSize: root.topBarButtonSize
+                cornerRadius: root.topBarButtonRadius
+                text: "\u22EF"
                 onClicked: root.toggleTopBarPopup("main-menu", mainMenuComponent, mainMenuButton)
+                ToolTip.visible: hovered
+                ToolTip.text: "Menu"
             }
 
-            Row {
+            RowLayout {
                 Layout.alignment: Qt.AlignVCenter
+                Layout.leftMargin: 4
                 spacing: 0
 
                 Item {
                     id: windowMinimizeButton
                     width: root.windowControlButtonWidth
-                    height: topBar.height
+                    height: root.windowControlButtonHeight
 
                     readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Minimize
                     readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Minimize
 
                     Rectangle {
                         anchors.fill: parent
+                        radius: root.windowControlCornerRadius
                         color: parent.pressed
-                                   ? Qt.rgba(0, 0, 0, 0.12)
-                                   : (parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                                   ? (palette.isDark ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(0, 0, 0, 0.12))
+                                   : (parent.hovered ? (palette.isDark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06)) : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
-                        text: "–"
-                        color: "#1f1f1f"
-                        font.pixelSize: 16
+                        text: "\u2013"
+                        color: palette.textPrimary
+                        font.pixelSize: 14
                     }
                 }
 
                 Item {
                     id: windowMaximizeButton
                     width: root.windowControlButtonWidth
-                    height: topBar.height
+                    height: root.windowControlButtonHeight
 
                     readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Maximize
                     readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Maximize
 
                     Rectangle {
                         anchors.fill: parent
+                        radius: root.windowControlCornerRadius
                         color: parent.pressed
-                                   ? Qt.rgba(0, 0, 0, 0.12)
-                                   : (parent.hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent")
+                                   ? (palette.isDark ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(0, 0, 0, 0.12))
+                                   : (parent.hovered ? (palette.isDark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06)) : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
-                        text: (root.visibility === Window.Maximized) ? "❐" : "□"
-                        color: "#1f1f1f"
-                        font.pixelSize: 14
+                        text: (root.visibility === Window.Maximized) ? "\u2750" : "\u25A1"
+                        color: palette.textPrimary
+                        font.pixelSize: 12
                     }
                 }
 
                 Item {
                     id: windowCloseButton
                     width: root.windowControlButtonWidth
-                    height: topBar.height
+                    height: root.windowControlButtonHeight
 
                     readonly property bool hovered: windowChrome.hoveredButton === WindowChromeController.Close
                     readonly property bool pressed: windowChrome.pressedButton === WindowChromeController.Close
 
                     Rectangle {
                         anchors.fill: parent
+                        radius: root.windowControlCornerRadius
                         color: parent.pressed ? "#c50f1f" : (parent.hovered ? "#e81123" : "transparent")
                     }
                     Text {
                         anchors.centerIn: parent
-                        text: "×"
-                        color: parent.hovered || parent.pressed ? "#ffffff" : "#1f1f1f"
-                        font.pixelSize: 16
+                        text: "\u2715"
+                        color: parent.hovered || parent.pressed ? "#ffffff" : palette.textPrimary
+                        font.pixelSize: 12
+                    }
+                }
+            }
+
+            }
+
+            Rectangle {
+                id: toolbarRow2
+                visible: topBar.secondaryRowVisible
+                Layout.fillWidth: true
+                Layout.preferredHeight: topBar.secondaryRowHeight
+                Layout.maximumHeight: topBar.secondaryRowHeight
+                color: root.chromeToolbarRowFill
+                border.color: root.chromeTopBarBorder
+                border.width: 1
+                radius: 10
+                clip: true
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 6
+
+                    ChromeToolButton {
+                        id: topBarBookmarksToggle
+                        compactStyle: true
+                        baseSize: 24
+                        cornerRadius: 10
+                        text: "\u2605"
+                        onClicked: commands.invoke("open-bookmarks")
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Open bookmarks"
+                    }
+
+                    Flickable {
+                        id: bookmarksRowScroller
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: 24
+                        clip: true
+                        contentWidth: bookmarksRowContent.implicitWidth
+                        contentHeight: height
+                        boundsBehavior: Flickable.StopAtBounds
+                        interactive: contentWidth > width
+
+                        Row {
+                            id: bookmarksRowContent
+                            spacing: 6
+
+                            Repeater {
+                                model: bookmarksModel
+
+                                delegate: ToolButton {
+                                    visible: !isFolder && index < 8
+                                    height: 24
+                                    text: title && title.length > 0 ? title : (url ? url.toString() : "")
+                                    leftPadding: 8
+                                    rightPadding: 8
+                                    topPadding: 1
+                                    bottomPadding: 1
+                                    font.pixelSize: 11
+                                    hoverEnabled: true
+
+                                    background: Rectangle {
+                                        radius: 10
+                                        color: parent.hovered
+                                               ? (palette.isDark ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(0, 0, 0, 0.06))
+                                               : (palette.isDark ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.03))
+                                        border.color: parent.activeFocus
+                                                      ? theme.accentColor
+                                                      : (palette.isDark ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.10))
+                                        border.width: parent.activeFocus ? 2 : 1
+                                    }
+
+                                    onClicked: {
+                                        const target = url ? url.toString() : ""
+                                        if (target.length > 0) {
+                                            commands.invoke("new-tab", { url: target })
+                                        }
+                                    }
+
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: root.tooltipDelayMs
+                                    ToolTip.text: text
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        id: topBarExtensionsDock
+                        spacing: 4
+
+                        Repeater {
+                            model: pinnedExtensionsModel
+
+                            delegate: ChromeToolButton {
+                                id: topBarPinnedExtensionButton
+                                required property string extensionId
+                                required property string name
+                                required property bool enabled
+                                required property var iconUrl
+                                required property string popupUrl
+                                required property string optionsUrl
+
+                                visible: index < 4
+                                compactStyle: true
+                                baseSize: root.topBarCompactButtonSize
+                                cornerRadius: root.topBarCompactButtonRadius
+                                display: (iconUrl && iconUrl.toString().length > 0) ? AbstractButton.IconOnly : AbstractButton.TextOnly
+                                icon.source: iconUrl
+                                text: name && name.length > 0 ? name[0].toUpperCase() : "\u2022"
+                                opacity: enabled ? 1.0 : 0.5
+
+                                onClicked: {
+                                    if (!enabled) {
+                                        commands.invoke("open-extensions")
+                                        return
+                                    }
+                                    root.openExtensionPopup(topBarPinnedExtensionButton, extensionId, name, popupUrl, optionsUrl)
+                                }
+
+                                ToolTip.visible: hovered
+                                ToolTip.text: name && name.length > 0 ? name : extensionId
+                            }
+                        }
+                    }
+
+                    ChromeToolButton {
+                        id: topBarExtensionsPanelButton
+                        compactStyle: true
+                        baseSize: root.topBarCompactButtonSize
+                        cornerRadius: root.topBarCompactButtonRadius
+                        text: "\u22EF"
+                        onClicked: commands.invoke("open-extensions")
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Manage extensions"
                     }
                 }
             }
@@ -3365,9 +3649,9 @@ ApplicationWindow {
 
         Rectangle {
             id: omniboxPopupRoot
-            color: Qt.rgba(1, 1, 1, 0.98)
-            radius: root.uiRadius
-            border.color: Qt.rgba(0, 0, 0, 0.08)
+            color: palette.isDark ? Qt.rgba(17 / 255, 20 / 255, 27 / 255, 0.98) : Qt.rgba(1, 1, 1, 0.98)
+            radius: Math.max(12, root.uiRadius + 2)
+            border.color: root.chromeTopBarBorder
             border.width: 1
 
             readonly property var anchorField: root.activeAddressField()
@@ -3553,7 +3837,9 @@ ApplicationWindow {
 
                 background: Rectangle {
                     radius: 6
-                    color: highlighted ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
+                    color: highlighted
+                           ? Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, palette.isDark ? 0.24 : 0.14)
+                           : "transparent"
                 }
 
                 onClicked: {
@@ -3577,7 +3863,8 @@ ApplicationWindow {
                             visible: type === "header"
                             text: title
                             font.pixelSize: 12
-                            opacity: 0.7
+                            opacity: 0.84
+                            color: palette.textSecondary
                         }
 
                         Item {
@@ -3585,11 +3872,11 @@ ApplicationWindow {
                             Layout.preferredHeight: 22
                             visible: type !== "header"
 
-                             Rectangle {
-                                 anchors.fill: parent
-                                 radius: 6
-                                 color: Qt.rgba(0, 0, 0, 0.06)
-                                 visible: !(faviconUrl && faviconUrl.toString().length > 0)
+                              Rectangle {
+                                  anchors.fill: parent
+                                  radius: 6
+                                  color: palette.isDark ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.06)
+                                  visible: !(faviconUrl && faviconUrl.toString().length > 0)
 
                                      Text {
                                          anchors.centerIn: parent
@@ -3605,10 +3892,11 @@ ApplicationWindow {
                                                                 ? "\u2605"
                                                                 : (kind === "history" ? "H" : (kind === "search" ? "S" : "U")))))
                                                 )
-                                         opacity: 0.7
-                                         font.pixelSize: 10
-                                     }
-                                 }
+                                          opacity: 0.7
+                                          font.pixelSize: 10
+                                          color: palette.textSecondary
+                                      }
+                                  }
 
                              Image {
                                  anchors.fill: parent
@@ -3646,19 +3934,19 @@ ApplicationWindow {
                                         id: titlePrefix
                                         text: titleRow.pre
                                         font.pixelSize: 13
-                                        color: "#1f1f1f"
+                                        color: palette.textPrimary
                                     }
                                     Text {
                                         id: titleMatch
                                         text: titleRow.mid
                                         font.pixelSize: 13
                                         font.bold: true
-                                        color: "#1f1f1f"
+                                        color: palette.isDark ? theme.accentColor : "#1f1f1f"
                                     }
                                     Text {
                                         text: titleRow.suf
                                         font.pixelSize: 13
-                                        color: "#1f1f1f"
+                                        color: palette.textPrimary
                                         elide: Text.ElideRight
                                         width: Math.max(0, titleRow.width - titlePrefix.implicitWidth - titleMatch.implicitWidth)
                                     }
@@ -3669,7 +3957,8 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 text: subtitle || ""
                                 font.pixelSize: 11
-                                opacity: 0.65
+                                opacity: 0.9
+                                color: palette.textSecondary
                                 elide: Text.ElideRight
                                 visible: subtitle && subtitle.length > 0
                             }
@@ -3678,7 +3967,8 @@ ApplicationWindow {
                         Text {
                             text: shortcut || ""
                             visible: type !== "header" && shortcut && shortcut.length > 0
-                            opacity: 0.6
+                            opacity: 0.95
+                            color: palette.textSecondary
                             font.pixelSize: 11
                             Layout.alignment: Qt.AlignVCenter
                         }
@@ -3783,18 +4073,24 @@ ApplicationWindow {
                 visible: true
                 opacity: showSidebar ? 1.0 : 0.0
                 clip: true
-                color: Qt.rgba(0, 0, 0, 0.04)
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: root.chromeSidebarFrom }
+                    GradientStop { position: 1.0; color: root.chromeSidebarTo }
+                }
+                border.color: root.chromeSidebarBorder
+                border.width: 1
 
             Behavior on Layout.preferredWidth {
                 NumberAnimation {
-                    duration: browser.settings.reduceMotion ? 0 : theme.motionNormalMs
+                    duration: root.uiMotionNormalMs
                     easing.type: Easing.InOutCubic
                 }
             }
 
             Behavior on opacity {
                 NumberAnimation {
-                    duration: browser.settings.reduceMotion ? 0 : theme.motionFastMs
+                    duration: root.uiMotionFastMs
                     easing.type: Easing.OutCubic
                 }
             }
@@ -3822,28 +4118,39 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 8
-                spacing: 8
+                anchors.leftMargin: root.designGrid * 2
+                anchors.rightMargin: root.designGrid * 2
+                anchors.bottomMargin: root.designGrid * 2
+                anchors.topMargin: root.singleToolbarActive() ? root.designGrid * 2 : root.designGrid * 8
+                spacing: root.designGrid * 2
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
                     visible: root.singleToolbarActive() && browser.settings.addressBarVisible
 
-                    ToolButton {
+                    ChromeToolButton {
                         Accessible.name: "Back"
-                        text: "←"
+                        baseSize: root.topBarButtonSize
+                        cornerRadius: root.topBarButtonRadius
+                        text: "\u2190"
                         enabled: root.focusedView ? root.focusedView.canGoBack : false
                         onClicked: commands.invoke("nav-back")
                     }
-                    ToolButton {
+
+                    ChromeToolButton {
                         Accessible.name: "Forward"
-                        text: "→"
+                        baseSize: root.topBarButtonSize
+                        cornerRadius: root.topBarButtonRadius
+                        text: "\u2192"
                         enabled: root.focusedView ? root.focusedView.canGoForward : false
                         onClicked: commands.invoke("nav-forward")
                     }
-                    ToolButton {
+
+                    ChromeToolButton {
                         Accessible.name: (root.focusedView && root.focusedView.isLoading) ? "Stop loading" : "Reload"
+                        baseSize: root.topBarButtonSize
+                        cornerRadius: root.topBarButtonRadius
                         text: (root.focusedView && root.focusedView.isLoading) ? "\u00D7" : "\u27F3"
                         onClicked: commands.invoke((root.focusedView && root.focusedView.isLoading) ? "nav-stop" : "nav-reload")
                     }
@@ -3854,12 +4161,40 @@ ApplicationWindow {
                         Accessible.name: "Address bar"
                         activeFocusOnTab: true
                         placeholderText: "Search or enter address"
+                        placeholderTextColor: palette.textSecondary
+                        color: palette.textPrimary
+                        selectionColor: Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.38)
+                        selectedTextColor: palette.textPrimary
+                        font.pixelSize: 13
+                        font.family: palette.fontDefault.family
+                        leftPadding: 14
+                        rightPadding: 14
                         selectByMouse: true
-                        background: Rectangle {
-                            radius: theme.cornerRadius
-                            color: Qt.rgba(1, 1, 1, 0.96)
-                            border.color: sidebarAddressField.activeFocus ? theme.accentColor : Qt.rgba(0, 0, 0, 0.18)
-                            border.width: sidebarAddressField.activeFocus ? 2 : 1
+
+                        background: Item {
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: -3
+                                radius: topBar.omniboxOuterRadius
+                                color: root.chromeOmniboxGlow
+                                opacity: sidebarAddressField.activeFocus ? 1.0 : 0.72
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: root.uiMotionFastMs
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: topBar.omniboxInnerRadius
+                                color: root.chromeOmniboxFill
+                                border.color: sidebarAddressField.activeFocus ? theme.accentColor : root.chromeOmniboxBorder
+                                border.width: sidebarAddressField.activeFocus ? 2 : 1
+                                antialiasing: true
+                            }
                         }
                         onTextChanged: scheduleOmniboxUpdate()
                         onActiveFocusChanged: {
@@ -3942,63 +4277,55 @@ ApplicationWindow {
                         }
                     }
 
-                    ToolButton {
-                        visible: root.focusedView && Math.abs((root.focusedView.zoomFactor || 1.0) - 1.0) > 0.001
-                        text: Math.round((root.focusedView.zoomFactor || 1.0) * 100) + "%"
+                    ChromeToolButton {
+                        visible: {
+                            const view = root.focusedView
+                            return view ? Math.abs((view.zoomFactor || 1.0) - 1.0) > 0.001 : false
+                        }
+                        baseSize: root.topBarButtonSize
+                        cornerRadius: root.topBarButtonRadius
+                        text: {
+                            const view = root.focusedView
+                            const factor = view ? (view.zoomFactor || 1.0) : 1.0
+                            return Math.round(factor * 100) + "%"
+                        }
+                        font.pixelSize: 11
                         onClicked: commands.invoke("zoom-reset")
                         ToolTip.visible: hovered
-                        ToolTip.delay: 300
                         ToolTip.text: "Reset zoom"
                     }
                 }
 
                 RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Math.max(4, Math.round(theme.spacing / 2))
-
-                    function buttonColor(active, hovered, enabled) {
-                        if (!enabled) {
-                            return Qt.rgba(0, 0, 0, 0.02)
-                        }
-                        if (active) {
-                            return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, hovered ? 0.22 : 0.18)
-                        }
-                        return hovered ? Qt.rgba(0, 0, 0, 0.06) : "transparent"
-                    }
-
-                    function buttonBorder(active, hovered, enabled) {
-                        if (!enabled) {
-                            return Qt.rgba(0, 0, 0, 0.06)
-                        }
-                        if (active) {
-                            return Qt.rgba(theme.accentColor.r, theme.accentColor.g, theme.accentColor.b, 0.35)
-                        }
-                        return hovered ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(0, 0, 0, 0.08)
-                    }
-
-                    function buttonRadius() {
-                        return Math.max(6, Math.round(root.uiRadius * 0.8))
-                    }
+                    id: sidebarToolStrip
+                    Layout.fillWidth: false
+                    Layout.alignment: Qt.AlignLeft
+                    Layout.preferredWidth: implicitWidth
+                    Layout.minimumWidth: implicitWidth
+                    Layout.maximumWidth: implicitWidth
+                    Layout.topMargin: 2
+                    Layout.bottomMargin: 2
+                    spacing: 6
 
                     function iconTextForId(buttonId) {
                         const id = String(buttonId || "").trim()
                         if (id === "tabs") {
-                            return "T"
+                            return "\u2630"
                         }
                         if (id === "bookmarks") {
                             return "\u2605"
                         }
                         if (id === "history") {
-                            return "H"
+                            return "\u23F2"
                         }
                         if (id === "downloads") {
-                            return "D"
+                            return "\u2B07"
                         }
                         if (id === "panels") {
-                            return "P"
+                            return "\u25A6"
                         }
                         if (id === "extensions") {
-                            return "E"
+                            return "\u2699"
                         }
                         return id.length > 0 ? id[0].toUpperCase() : "?"
                     }
@@ -4071,7 +4398,7 @@ ApplicationWindow {
                     Repeater {
                         model: sidebarButtons
 
-                        delegate: ToolButton {
+                        delegate: ChromeToolButton {
                             id: sidebarToolButton
                             required property string entryId
                             required property string title
@@ -4080,34 +4407,28 @@ ApplicationWindow {
 
                             visible: shown
                             Accessible.name: title
-                            text: root.sidebarShowIconsOnly ? iconTextForId(entryId) : title
-                            enabled: enabledForId(entryId)
-                            onClicked: handleToolClick(entryId, sidebarToolButton)
+                            text: sidebarToolStrip.iconTextForId(entryId)
+                            baseSize: 32
+                            cornerRadius: 16
+                            activeState: sidebarToolStrip.activeForId(entryId)
+                            enabled: sidebarToolStrip.enabledForId(entryId)
+                            onClicked: sidebarToolStrip.handleToolClick(entryId, sidebarToolButton)
 
-                            background: Rectangle {
-                                radius: buttonRadius()
-                                readonly property bool active: activeForId(entryId)
-                                color: buttonColor(active, parent.hovered, parent.enabled)
-                                border.color: parent.activeFocus ? theme.accentColor : buttonBorder(active, parent.hovered, parent.enabled)
-                                border.width: parent.activeFocus ? 2 : 1
-
-                                Downloads.DownloadAnimation {
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 3
-                                    downloads: root.downloadsModel
-                                    reduceMotion: browser.settings.reduceMotion
-                                    visible: entryId === "downloads"
-                                }
+                            Downloads.DownloadAnimation {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 3
+                                downloads: root.downloadsModel
+                                reduceMotion: browser.settings.reduceMotion
+                                visible: entryId === "downloads"
                             }
 
                             ToolTip.visible: hovered
-                            ToolTip.delay: root.tooltipDelayMs
                             ToolTip.text: title
                         }
                     }
 
-                    Item { Layout.fillWidth: true }
+                    Item { width: 0; height: 0 }
                 }
 
                 TabFilterModel {
@@ -4564,6 +4885,7 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly
 
                     Label {
                         Layout.fillWidth: true
@@ -4587,6 +4909,7 @@ ApplicationWindow {
                 ListView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: Math.min(contentHeight, 100)
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly
                     clip: true
                     model: quickLinks
 
@@ -4600,7 +4923,7 @@ ApplicationWindow {
                 Item {
                     Layout.fillWidth: true
                     implicitHeight: tabsLabel.implicitHeight
-                    visible: root.effectiveSidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly
 
                     Label {
                         id: tabsLabel
@@ -5923,18 +6246,19 @@ ApplicationWindow {
 
                 NotificationsStack {
                     Layout.fillWidth: true
-                    visible: root.effectiveSidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly
                     notifications: root.notificationsModel
                 }
 
                 MediaControls {
                     Layout.fillWidth: true
-                    visible: root.effectiveSidebarPanel === "tabs"
+                    visible: root.effectiveSidebarPanel === "tabs" && !root.sidebarShowIconsOnly
                     view: root.mediaView
                 }
 
                 SidebarFooter {
                     Layout.fillWidth: true
+                    compactMode: root.sidebarShowIconsOnly
                     browser: root.browserModel
                     workspaces: root.browserModel.workspaces
                     settings: root.browserModel.settings
